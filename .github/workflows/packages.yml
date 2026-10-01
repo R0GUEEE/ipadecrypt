@@ -39,7 +39,9 @@ jobs:
         run: |
           set -euo pipefail
           hash=$(sha256sum helper/Dockerfile | cut -c1-12)
-          img="ghcr.io/${{ github.repository_owner }}/ipadecrypt-toolchain:df-${hash}"
+          # GHCR requires a lowercase repository name; GitHub logins may not be.
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          img="ghcr.io/${owner}/ipadecrypt-toolchain:df-${hash}"
           if docker manifest inspect "$img" >/dev/null 2>&1; then
             echo "reusing $img"
           else
