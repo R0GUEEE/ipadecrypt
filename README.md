@@ -48,6 +48,19 @@ All installable through Sileo:
 
 > Tested on palera1n rootless, Dopamine rootless, and RootHide. iOS 14 through 17 on A10–A14 devices are expected to work.
 
+**iOS 16.7.x / palera1n rootless.** iOS 16.7.x is the last 16.x branch for
+A9–A11 hardware (iPhone 8, iPhone 8 Plus, iPhone X, iPad 5/6, iPad Pro 10.5),
+which is jailbroken with palera1n rootless - Dopamine stops at 16.6.1. That
+setup is supported end to end:
+
+- `bootstrap` installs the **rootless** helper and tweak packages
+  (`iphoneos-arm64`, i.e. `/var/jb` paths) on any jailbreak that is not
+  RootHide.
+- The app and the tweak ship **arm64 and arm64e** slices; the helper is arm64,
+  which runs on A9/A10/A11 devices.
+- Everything is built against an iOS 15 deployment target, so the same
+  packages install on 16.7.x and on the jailbreaks below.
+
 ## Install
 
 This fork is intended to live under `~/ipadecrypt/src`, with runtime files
@@ -82,10 +95,21 @@ Refer to [BUILDING.md](BUILDING.md) for helper and release-style build details.
 The release includes `.deb` packages for the on-device app and the optional
 auto-confirm tweak:
 
-- `com.korboy.ipadecrypt_0.7.3-korboy.2_iphoneos-arm64.deb`
-- `com.korboy.ipadecrypt_0.7.3-korboy.2_iphoneos-arm64e.deb` for RootHide
-- `com.korboy.ipadecryptautoalert_0.7.3-korboy.2_iphoneos-arm64.deb`
-- `com.korboy.ipadecryptautoalert_0.7.3-korboy.2_iphoneos-arm64e.deb` for RootHide
+- `com.korboy.ipadecrypt_0.7.3-korboy.3_iphoneos-arm64.deb`
+- `com.korboy.ipadecrypt_0.7.3-korboy.3_iphoneos-arm64e.deb` for RootHide
+- `com.korboy.ipadecryptautoalert_0.7.3-korboy.3_iphoneos-arm64.deb`
+- `com.korboy.ipadecryptautoalert_0.7.3-korboy.3_iphoneos-arm64e.deb` for RootHide
+
+To build every package from source without touching a device (CI does exactly
+this - see `.github/workflows/packages.yml`):
+
+```sh
+THEOS=~/theos sh Tools/build-packages.sh --refresh-embedded
+```
+
+`--refresh-embedded` rewrites `internal/device/ipadecryptautoalert*.deb` (and
+the helper, with `--helper PATH`) so a released CLI bootstraps the versions
+this build produced. `--rootless-only` skips the RootHide pair.
 
 To build and install the rootless app locally:
 

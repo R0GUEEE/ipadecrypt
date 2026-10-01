@@ -66,3 +66,37 @@ CI (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the exact s
 In practice this means: **if you touch `helper.c` or `entitlements.plist`, rebuild and commit the new `internal/device/ipadecrypt-helper-arm64` in the same PR**. If you don't, CI catches it.
 
 The drift is meaningful because the canonical build environment is reproducible, not because we got lucky - the whole point of the container is that there's no difference between your build and CI's.
+
+Note that any change to a file the helper compiles (`helper/*.c`) needs that rebuild, not just `helper.c` and `entitlements.plist`.
+
+## Build the .deb packages
+
+The app and the auto-confirm tweak are Theos packages. `app/build.sh` builds
+the rootless app package **and installs it over SSH**; to build the packages
+without a device (what CI does), use:
+
+```sh
+THEOS=~/theos sh Tools/build-packages.sh                 # rootless + RootHide
+THEOS=~/theos sh Tools/build-packages.sh --rootless-only # rootless only
+```
+
+It builds `appstore-helper.arm64` and `ipadecryptd` for iOS, signs them with
+`ldid`, then runs `make package` for both projects and drops the results in
+`dist/`:
+
+| Package | Architecture | Scheme |
+|---|---|---|
+| `com.korboy.ipadecrypt_*_iphoneos-arm64.deb` | arm64 | rootless (`/var/jb`) |
+| `com.korboy.ipadecryptautoalert_*_iphoneos-arm64.deb` | arm64 | rootless |
+| `com.korboy.ipadecrypt_*_iphoneos-arm64e.deb` | arm64e | RootHide |
+| `com.korboy.ipadecryptautoalert_*_iphoneos-arm64e.deb` | arm64e | RootHide |
+
+The RootHide pair needs the RootHide Theos fork (`THEOS_ROOTHIDE`, default
+`~/theos-roothide`) and is skipped when it is absent. `--helper PATH` embeds a
+freshly built helper instead of the committed one, and `--refresh-embedded`
+also copies the built tweak packages (and that helper) into `internal/device/`
+so a released CLI bootstraps the same versions.
+
+`.github/workflows/packages.yml` runs exactly this on a macOS runner - helper
+in the pinned container, packages with Theos - and uploads `dist/*.deb` plus
+the refreshed `internal/device/` files as artifacts.
