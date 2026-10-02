@@ -74,4 +74,6 @@ Decryption runs through the `ipadecryptd` daemon socket.
 **Practical consequence:** upstream's `internal/appstore` and `internal/sap`
 cannot be merged into the app branch as-is. When syncing from upstream, take
 helper/CLI fixes and leave the App Store protocol layer alone. See
-[`docs/ARCHITECTURE.md`](ARCHITECTURE.md).
+[`docs/ARCHITECTURE.md`](ARCHITECTURE.md), and
+[`docs/APPLE-ID-LOGIN.md`](APPLE-ID-LOGIN.md) for what the app does instead of a
+sign-in.

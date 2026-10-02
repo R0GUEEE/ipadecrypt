@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/londek/ipadecrypt/internal/appstore"
@@ -45,6 +46,8 @@ func main() {
 	var authStatus bool
 	var externalVersionID string
 	var decryptHelper, decryptBundleID, decryptBundlePath, decryptOutIPA string
+	var deviceSessionFlag bool
+	var deviceDSID, deviceStoreFront, deviceCookieJar string
 	flag.StringVar(&bundleID, "bundle-id", "", "bundle identifier")
 	flag.StringVar(&trackID, "track-id", "", "App Store track ID")
 	flag.StringVar(&email, "email", "", "Apple ID email")
@@ -56,6 +59,11 @@ func main() {
 	flag.BoolVar(&authOnly, "auth-only", false, "refresh App Store authentication and exit")
 	flag.BoolVar(&authStatus, "auth-status", false, "report whether complete saved App Store authentication is available")
 	flag.StringVar(&externalVersionID, "external-version-id", "", "pin to a specific historical App Store version")
+	flag.BoolVar(&deviceSessionFlag, "device-session", false,
+		"use the device's own App Store session instead of an Apple ID sign-in")
+	flag.StringVar(&deviceDSID, "dsid", "", "Directory Services id to pair with the device session")
+	flag.StringVar(&deviceStoreFront, "storefront", "", "numeric App Store storefront for the device session")
+	flag.StringVar(&deviceCookieJar, "cookie-jar", "", "explicit Cookies.binarycookies path to read the device session from")
 	flag.StringVar(&decryptHelper, "decrypt-helper", "", "run decrypt helper and relay events")
 	flag.StringVar(&decryptBundleID, "decrypt-bundle-id", "", "bundle identifier for decrypt helper")
 	flag.StringVar(&decryptBundlePath, "decrypt-bundle-path", "", "installed bundle path for decrypt helper")
@@ -134,6 +142,23 @@ func main() {
 func runAuthStatus() error {
 	emit("phase", "step", "name", "loading-config")
 
+	// The device's own App Store session is a complete credential on iOS - it
+	// is what replaced the Apple ID sign-in this app cannot perform.
+	if deviceSessionFlag {
+		if session, err := resolveDeviceSession(); err == nil {
+			emit("phase", "device-session",
+				"dsidLength", strconv.Itoa(len(session.DSID)),
+				"storefront", session.StoreFront,
+				"cookies", strconv.Itoa(len(session.Cookies)),
+				"jars", strconv.Itoa(len(session.Sources)))
+			emit("phase", "done", "name", "authenticated")
+
+			return nil
+		} else {
+			emit("phase", "device-session-failed", "reason", err.Error())
+		}
+	}
+
 	cfg, err := config.LoadReadOnly(configFile())
 	if errors.Is(err, os.ErrNotExist) {
 		return errAuthRequired
@@ -165,6 +190,25 @@ func savedAppleAuthAvailable(cfg *config.Config) bool {
 func runAuthOnly(email, password, authCode string) error {
 	emit("phase", "step", "name", "loading-config")
 	defer chownConfig()
+
+	// Signing in with an Apple ID cannot work on iOS (Apple requires the SAP
+	// action signature, which needs an x86_64 Unicorn library that has no iOS
+	// build), so the device's own App Store session is the whole credential.
+	// Only fall through to a password login when that is unavailable.
+	if deviceSessionFlag {
+		if session, err := resolveDeviceSession(); err == nil {
+			emit("phase", "device-session",
+				"dsidLength", strconv.Itoa(len(session.DSID)),
+				"storefront", session.StoreFront,
+				"cookies", strconv.Itoa(len(session.Cookies)),
+				"jars", strconv.Itoa(len(session.Sources)))
+			emit("phase", "done", "name", "authenticated")
+
+			return nil
+		} else {
+			emit("phase", "device-session-failed", "reason", err.Error())
+		}
+	}
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -276,6 +320,96 @@ func run(bundleID, trackID, email, password, authCode, externalVersionID string)
 	return nil
 }
 
+// deviceSessionOnce caches the resolved device session for the process: the
+// cookie-jar scan touches dozens of files and each command needs it at most
+// once.
+var (
+	deviceSessionOnce  sync.Once
+	resolvedSession    *appstore.DeviceSession
+	resolvedSessionErr error
+)
+
+// resolveDeviceSession reads the App Store session the phone already has.
+//
+// The on-device app cannot sign in with an Apple ID at all. Apple requires an
+// X-Apple-ActionSignature on the authenticate request, and producing one needs
+// SAP, which runs a prebuilt x86_64 Unicorn library that simply does not exist
+// for iOS. Every other App Store call is sent unsigned and authenticates from
+// the session cookies, so reusing the device's own App Store session is the
+// supported path here.
+func resolveDeviceSession() (*appstore.DeviceSession, error) {
+	deviceSessionOnce.Do(func() {
+		jars := make([]string, 0, 8)
+		if deviceCookieJar != "" {
+			jars = append(jars, deviceCookieJar)
+		}
+
+		jars = append(jars, appstore.DiscoverCookieJars(appstore.DefaultCookieJarPatterns())...)
+
+		// --storefront accepts either the numeric id the device reports or a
+		// two-letter country code, which is all the app can get without
+		// touching private frameworks.
+		storeFront := strings.TrimSpace(deviceStoreFront)
+		if storeFront != "" {
+			if resolved, err := appstore.ResolveStorefront(storeFront); err == nil {
+				storeFront = resolved
+			} else {
+				storeFront = ""
+			}
+		}
+
+		resolvedSession, resolvedSessionErr = appstore.LoadDeviceSession(jars, deviceDSID, storeFront, "")
+	})
+
+	return resolvedSession, resolvedSessionErr
+}
+
+// installDeviceSession attaches the device session to the client when one is
+// available and reports the outcome as events for the app to display.
+func installDeviceSession(cfg *config.Config, as *appstore.Client) *appstore.DeviceSession {
+	emit("phase", "step", "name", "device-session")
+
+	session, err := resolveDeviceSession()
+	if err != nil {
+		emit("phase", "device-session-failed", "reason", err.Error())
+		return nil
+	}
+
+	as.UseDeviceSession(session)
+	installDeviceIdentity(cfg, session)
+	emit("phase", "device-session",
+		"dsidLength", strconv.Itoa(len(session.DSID)),
+		"storefront", session.StoreFront,
+		"cookies", strconv.Itoa(len(session.Cookies)),
+		"jars", strconv.Itoa(len(session.Sources)))
+
+	return session
+}
+
+// installDeviceIdentity copies the device session's identity into the config.
+//
+// Every App Store call site reads cfg.Apple.Account(), so putting the device
+// identity there covers all of them - version listing, metadata, download
+// tickets - without threading an account through each one. Nothing is saved:
+// the config is only written by an explicit sign-in.
+func installDeviceIdentity(cfg *config.Config, session *appstore.DeviceSession) {
+	if cfg == nil || session == nil {
+		return
+	}
+
+	if dsid := strings.TrimSpace(session.DSID); dsid != "" {
+		cfg.Apple.DirectoryServicesIdentifier = dsid
+	}
+
+	if storeFront := strings.TrimSpace(session.StoreFront); storeFront != "" {
+		cfg.Apple.StoreFront = storeFront
+	}
+
+	// A device session has no password token, and leaving a stale one behind
+	// would make the App Store treat the request as a different session.
+	cfg.Apple.PasswordToken = ""
+}
+
 func prepareAppStore(bundleID, trackID, email, password, authCode string) (*config.Config, *appstore.Client, appstore.App, error) {
 	cfg, err := loadConfig()
 	if err != nil {
@@ -287,7 +421,15 @@ func prepareAppStore(bundleID, trackID, email, password, authCode string) (*conf
 		return nil, nil, appstore.App{}, fmt.Errorf("appstore client: %w", err)
 	}
 
-	if email != "" || password != "" || authCode != "" {
+	var session *appstore.DeviceSession
+	if deviceSessionFlag {
+		session = installDeviceSession(cfg, as)
+	}
+
+	// A device session replaces the Apple ID sign-in entirely; a password login
+	// would only fail (Apple insists on the SAP signature that iOS cannot
+	// produce), so it is skipped rather than attempted.
+	if session == nil && (email != "" || password != "" || authCode != "") {
 		err := refreshAppleAuth(cfg, email, password, authCode, func(email, password, authCode string) error {
 			emit("phase", "step", "name", "authenticating")
 			return appstoreworkflow.LoginAndSave(cfg, as, email, password, authCode)
@@ -298,12 +440,16 @@ func prepareAppStore(bundleID, trackID, email, password, authCode string) (*conf
 		emit("phase", "done", "name", "authenticated")
 	}
 
-	if cfg.Apple.PasswordToken == "" || cfg.Apple.DirectoryServicesIdentifier == "" {
+	account := cfg.Apple.Account()
+	switch {
+	case session != nil:
+		// The device's session stands in for a password login: it carries the
+		// account id and cookies the App Store actually authenticates against.
+		account = session.Account()
+	case cfg.Apple.PasswordToken == "" || cfg.Apple.DirectoryServicesIdentifier == "":
 		emit("phase", "auth-required")
 		return nil, nil, appstore.App{}, errAuthRequired
 	}
-
-	account := cfg.Apple.Account()
 	var app appstore.App
 	if trackID != "" && trackID != "0" {
 		emit("phase", "step", "name", "lookup-track")

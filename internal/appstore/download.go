@@ -169,8 +169,13 @@ func (c *Client) volumeDownload(acc *Account, app App, externalVersionID string)
 
 	headers := map[string]string{
 		"Content-Type": "application/x-apple-plist",
-		"iCloud-DSID":  acc.DirectoryServicesID,
-		"X-Dsid":       acc.DirectoryServicesID,
+	}
+	// A device session has a real DSID but no password token; a logged-in
+	// account has both. Only send the headers we actually have - an empty
+	// X-Dsid reads as "no account" on the wire.
+	if dsid := strings.TrimSpace(acc.DirectoryServicesID); dsid != "" {
+		headers["iCloud-DSID"] = dsid
+		headers["X-Dsid"] = dsid
 	}
 
 	var out downloadResult

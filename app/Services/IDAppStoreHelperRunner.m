@@ -1,4 +1,5 @@
 #import "IDAppStoreHelperRunner.h"
+#import "IDDeviceStoreAccount.h"
 #import "Logging.h"
 #import <spawn.h>
 #import <sys/wait.h>
@@ -43,6 +44,15 @@ static NSDictionary *IDParseAppStoreEvent(NSString *line) {
 }
 
 @implementation IDAppStoreHelperRunner
+
+// Apple requires an X-Apple-ActionSignature on the App Store's authenticate
+// request, and the only thing that can produce one is SAP: a prebuilt x86_64
+// Unicorn library that has no iOS build. Every other App Store call is sent
+// unsigned and authenticates from the session cookies, so the helper is always
+// pointed at the device's own App Store session rather than a password.
++ (void)appendDeviceSessionArguments:(NSMutableArray<NSString *> *)args {
+    [args addObjectsFromArray:[IDDeviceStoreAccount helperArguments]];
+}
 
 + (BOOL)hasActiveOperation {
     @synchronized (self) {
@@ -266,6 +276,7 @@ static NSDictionary *IDParseAppStoreEvent(NSString *line) {
                 onEvent:(void (^)(NSDictionary *))eventBlock
              completion:(void (^)(int, NSError *))completion {
     NSMutableArray<NSString *> *args = [NSMutableArray array];
+    [self appendDeviceSessionArguments:args];
     if (bundleID.length) {
         [args addObjectsFromArray:@[@"--bundle-id", bundleID]];
     }
@@ -296,6 +307,7 @@ static NSDictionary *IDParseAppStoreEvent(NSString *line) {
                           onEvent:(void (^)(NSDictionary *))eventBlock
                        completion:(void (^)(int, NSError *))completion {
     NSMutableArray<NSString *> *args = [NSMutableArray arrayWithObject:@"--list-versions"];
+    [self appendDeviceSessionArguments:args];
     if (bundleID.length) {
         [args addObjectsFromArray:@[@"--bundle-id", bundleID]];
     }
@@ -327,6 +339,7 @@ static NSDictionary *IDParseAppStoreEvent(NSString *line) {
         @"--version-metadata",
         @"--external-version-id", externalVersionID ?: @"",
         nil];
+    [self appendDeviceSessionArguments:args];
     if (bundleID.length) {
         [args addObjectsFromArray:@[@"--bundle-id", bundleID]];
     }
@@ -352,6 +365,7 @@ static NSDictionary *IDParseAppStoreEvent(NSString *line) {
                      onEvent:(void (^)(NSDictionary *))eventBlock
                   completion:(void (^)(int, NSError *))completion {
     NSMutableArray<NSString *> *args = [NSMutableArray arrayWithObject:@"--auth-only"];
+    [self appendDeviceSessionArguments:args];
     if (email.length) {
         [args addObjectsFromArray:@[@"--email", email]];
     }
@@ -366,7 +380,10 @@ static NSDictionary *IDParseAppStoreEvent(NSString *line) {
 }
 
 + (void)checkSavedAuthWithCompletion:(void (^)(int, NSError *))completion {
-    [self spawnWithArguments:@[@"--auth-status"] onEvent:nil completion:completion];
+    NSMutableArray<NSString *> *args = [NSMutableArray arrayWithObject:@"--auth-status"];
+    [self appendDeviceSessionArguments:args];
+
+    [self spawnWithArguments:args onEvent:nil completion:completion];
 }
 
 + (void)verifyIPA:(NSString *)ipaPath
