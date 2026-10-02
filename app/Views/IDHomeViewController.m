@@ -789,7 +789,7 @@ static NSString *IDPrettyImageName(NSString *name) {
         if (deviceSessionFailure.length) {
             [self setAppleAuthState:IDAppleAuthStateRequired forGeneration:authGeneration];
             NSString *message = [NSString stringWithFormat:
-                @"No App Store session found on this device: %@\n\nSign in to the App Store in Settings, open the App Store app once, then try again.",
+                @"No App Store session found on this device: %@\n\niOS keeps the App Store's sign-in inside StoreServices, not in the cookie stores ipadecrypt can read, so the App Store version list is not available here.\n\nUse 'Latest iOS-compatible' (downloads through this device's own App Store) or 'Decrypt installed build'. For the full version picker, run ipadecrypt on a computer.",
                 deviceSessionFailure];
             [vc markCompleteWithOutputIPA:@""
                                     error:[NSError errorWithDomain:@"IDAppStoreAuth" code:3
@@ -985,7 +985,7 @@ static NSString *IDPrettyImageName(NSString *name) {
         if (deviceSessionFailure.length) {
             [self setAppleAuthState:IDAppleAuthStateRequired forGeneration:authGeneration];
             NSString *message = [NSString stringWithFormat:
-                @"No App Store session found on this device: %@\n\nSign in to the App Store in Settings, open the App Store app once, then try again.",
+                @"No App Store session found on this device: %@\n\niOS keeps the App Store's sign-in inside StoreServices, not in the cookie stores ipadecrypt can read, so the App Store version list is not available here.\n\nUse 'Latest iOS-compatible' (downloads through this device's own App Store) or 'Decrypt installed build'. For the full version picker, run ipadecrypt on a computer.",
                 deviceSessionFailure];
             [vc markCompleteWithMessage:nil
                                   error:[NSError errorWithDomain:@"IDAppStoreAuth" code:3

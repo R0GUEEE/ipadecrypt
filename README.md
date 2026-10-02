@@ -99,10 +99,10 @@ Refer to [BUILDING.md](BUILDING.md) for helper and release-style build details.
 The release includes `.deb` packages for the on-device app and the optional
 auto-confirm tweak:
 
-- `com.korboy.ipadecrypt_0.7.7-korboy.1_iphoneos-arm64.deb`
-- `com.korboy.ipadecrypt_0.7.7-korboy.1_iphoneos-arm64e.deb` for RootHide
-- `com.korboy.ipadecryptautoalert_0.7.7-korboy.1_iphoneos-arm64.deb`
-- `com.korboy.ipadecryptautoalert_0.7.7-korboy.1_iphoneos-arm64e.deb` for RootHide
+- `com.korboy.ipadecrypt_0.7.8-korboy.1_iphoneos-arm64.deb`
+- `com.korboy.ipadecrypt_0.7.8-korboy.1_iphoneos-arm64e.deb` for RootHide
+- `com.korboy.ipadecryptautoalert_0.7.8-korboy.1_iphoneos-arm64.deb`
+- `com.korboy.ipadecryptautoalert_0.7.8-korboy.1_iphoneos-arm64e.deb` for RootHide
 
 For iOS 16.7.x install the `iphoneos-arm64` pair - that is the rootless build
 palera1n needs.
@@ -240,7 +240,7 @@ ipadecrypt versions <bundle-id|app-store-id|app-store-url>
 
 - [New, unsupported SC_Info format is shipped with some apps, ipadecrypt will fail to decrypt them.](https://github.com/londek/ipadecrypt/issues/34)
 - Due to arm64e PPL guards on A12+, some apps such as Apple's are not expected to work.
-- **Apple ID sign-in is desktop-only.** On iOS the app uses the phone's existing App Store session instead - Apple requires a signature on `authenticate` that only Apple's macOS tooling can produce. [docs/APPLE-ID-LOGIN.md](docs/APPLE-ID-LOGIN.md) explains it and lists the failure modes.
+- **The App Store version picker is desktop-only.** Apple requires an `X-Apple-ActionSignature` on `authenticate`, which only Apple's macOS tooling can produce, and iOS keeps its App Store session inside StoreServices rather than in cookies - a scan of a real device found only third-party web cookies. On-device, use *Latest iOS-compatible* (downloads through the phone's own App Store) or *Decrypt installed build*; run the CLI on a computer when you need to choose a specific historical version. [docs/APPLE-ID-LOGIN.md](docs/APPLE-ID-LOGIN.md) has the evidence.
 
 ## License
 
