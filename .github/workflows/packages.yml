@@ -127,14 +127,27 @@ jobs:
           dpkg-deb --version | head -n 1
 
       - name: install Theos
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git clone --recursive --depth 1 https://github.com/theos/theos.git "$HOME/theos"
           mkdir -p "$HOME/theos/sdks"
-          url=$(curl -fsSL https://api.github.com/repos/theos/sdks/releases/latest \
+
+          # Unauthenticated api.github.com calls are rate limited per IP, and
+          # runners share IPs, so this used to fail with a bare 403. Authenticate
+          # and retry.
+          url=$(curl -fsSL --retry 5 --retry-all-errors \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                https://api.github.com/repos/theos/sdks/releases/latest \
                 | jq -r '.assets[] | select(.name == "iPhoneOS16.5.sdk.tar.xz") | .browser_download_url')
-          [ -n "$url" ]
-          curl -fsSL -o /tmp/iPhoneOS.sdk.tar.xz "$url"
+          if [ -z "$url" ] || [ "$url" = "null" ]; then
+            echo "::error::no iPhoneOS16.5.sdk.tar.xz asset on theos/sdks latest release"
+            exit 1
+          fi
+
+          curl -fsSL --retry 5 --retry-all-errors -o /tmp/iPhoneOS.sdk.tar.xz "$url"
           tar -xJf /tmp/iPhoneOS.sdk.tar.xz -C "$HOME/theos/sdks"
           ls "$HOME/theos/sdks"
 
