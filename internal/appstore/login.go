@@ -16,7 +16,7 @@ import (
 // ships as a PyPI wheel with no iOS build. On a phone there is no way to sign in
 // with a password; the device's own App Store session is the only path (see
 // device_session.go).
-var ErrSignatureRequired = errors.New("Apple requires a signed sign-in request (X-Apple-ActionSignature)")
+var ErrSignatureRequired = errors.New("sign-in rejected: Apple requires an X-Apple-ActionSignature")
 
 // signatureRequiredError turns Apple's transport-level refusal into something
 // actionable. An unsigned authenticate gets a bare 404/403 HTML page instead of
