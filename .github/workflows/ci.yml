@@ -34,6 +34,22 @@ jobs:
           version: '~> v2'
           args: check
 
+  test:
+    name: go test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      # Nothing ran `go test` before: the build job only compiles, so unit
+      # tests were never exercised in CI at all.
+      - name: go test
+        run: go test ./...
+
   build:
     name: build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -54,6 +70,11 @@ jobs:
 
       - name: go build
         run: go build -trimpath -ldflags="-s -w" -o ipadecrypt ./cmd/ipadecrypt
+
+      # The artifact above is only ./cmd/ipadecrypt, so the daemon and the
+      # on-device helper would not be compiled anywhere on a normal push.
+      - name: go build ./...
+        run: go build ./...
 
       - name: app policy tests
         if: runner.os == 'macOS'

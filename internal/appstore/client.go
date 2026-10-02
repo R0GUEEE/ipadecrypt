@@ -12,8 +12,41 @@ import (
 )
 
 type Client struct {
-	jar  *cookiejar.Jar
-	http *http.Client
+	jar    *cookiejar.Jar
+	http   *http.Client
+	merged *mergeJar
+	device *DeviceSession
+}
+
+// UseDeviceSession installs cookies taken from the device's own App Store
+// session. They are served alongside the persistent jar and never written to
+// it, so the client keeps them read-only.
+func (c *Client) UseDeviceSession(session *DeviceSession) {
+	if c == nil || session == nil {
+		return
+	}
+
+	c.device = session
+	c.merged.device = session.Cookies
+}
+
+// DeviceSession returns the session installed by UseDeviceSession.
+func (c *Client) DeviceSession() *DeviceSession {
+	if c == nil {
+		return nil
+	}
+
+	return c.device
+}
+
+// DeviceAccount returns the account for the installed device session. It has
+// no PasswordToken; callers must not assume one is present.
+func (c *Client) DeviceAccount() *Account {
+	if c == nil || c.device == nil {
+		return nil
+	}
+
+	return c.device.Account()
 }
 
 func New(cookiesFile string) (*Client, error) {
@@ -39,7 +72,10 @@ func New(cookiesFile string) (*Client, error) {
 		},
 	}
 
-	return &Client{jar: jar, http: hc}, nil
+	merged := &mergeJar{base: hc.Jar}
+	hc.Jar = merged
+
+	return &Client{jar: jar, http: hc, merged: merged}, nil
 }
 
 // guid returns the Configurator-shaped GUID: uppercase MAC address, no colons.

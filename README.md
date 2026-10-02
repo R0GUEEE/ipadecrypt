@@ -31,6 +31,7 @@ This fork adds a handful of QoL features on top of upstream:
 - **Faster IPA post-processing.** Metadata/Watch cleanup is combined into one scanned pass and skips rewriting entirely when there is nothing to remove. Cryptid verification streams Mach-O load commands instead of reading whole binaries into memory.
 - **~60× faster install check.** Replaced the per-file shell loop with a single `grep` over all top-level Info.plists.
 - **Short command flags.** `-d` (decrypt), `-b` (bootstrap), `-v` (versions), `-dl` (download), `-a`/`auth` (refresh Apple ID auth), `-k` (keep policy), `-u` (update).
+- **No Apple ID sign-in on iOS.** Apple requires an `X-Apple-ActionSignature` on the App Store's authenticate request, and producing one needs SAP - which runs a prebuilt x86_64 Unicorn library that has no iOS build. The app therefore uses the App Store session the phone already has (StoreServices account id + the store containers' `Cookies.binarycookies`) and never calls authenticate. See [docs/APPLE-ID-LOGIN.md](docs/APPLE-ID-LOGIN.md). The desktop CLI is unchanged and still signs in normally.
 
 ## Requirements
 
@@ -98,10 +99,10 @@ Refer to [BUILDING.md](BUILDING.md) for helper and release-style build details.
 The release includes `.deb` packages for the on-device app and the optional
 auto-confirm tweak:
 
-- `com.korboy.ipadecrypt_0.7.4-korboy.1_iphoneos-arm64.deb`
-- `com.korboy.ipadecrypt_0.7.4-korboy.1_iphoneos-arm64e.deb` for RootHide
-- `com.korboy.ipadecryptautoalert_0.7.4-korboy.1_iphoneos-arm64.deb`
-- `com.korboy.ipadecryptautoalert_0.7.4-korboy.1_iphoneos-arm64e.deb` for RootHide
+- `com.korboy.ipadecrypt_0.7.5-korboy.1_iphoneos-arm64.deb`
+- `com.korboy.ipadecrypt_0.7.5-korboy.1_iphoneos-arm64e.deb` for RootHide
+- `com.korboy.ipadecryptautoalert_0.7.5-korboy.1_iphoneos-arm64.deb`
+- `com.korboy.ipadecryptautoalert_0.7.5-korboy.1_iphoneos-arm64e.deb` for RootHide
 
 For iOS 16.7.x install the `iphoneos-arm64` pair - that is the rootless build
 palera1n needs.
@@ -239,6 +240,7 @@ ipadecrypt versions <bundle-id|app-store-id|app-store-url>
 
 - [New, unsupported SC_Info format is shipped with some apps, ipadecrypt will fail to decrypt them.](https://github.com/londek/ipadecrypt/issues/34)
 - Due to arm64e PPL guards on A12+, some apps such as Apple's are not expected to work.
+- **Apple ID sign-in is desktop-only.** On iOS the app uses the phone's existing App Store session instead - Apple requires a signature on `authenticate` that only Apple's macOS tooling can produce. [docs/APPLE-ID-LOGIN.md](docs/APPLE-ID-LOGIN.md) explains it and lists the failure modes.
 
 ## License
 

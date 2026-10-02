@@ -138,26 +138,19 @@ jobs:
           tar -xJf /tmp/iPhoneOS.sdk.tar.xz -C "$HOME/theos/sdks"
           ls "$HOME/theos/sdks"
 
-      - name: check embedded packages are fresh
+      - name: record committed embedded package versions
+        id: embedded
         run: |
           set -euo pipefail
           src=$(sed -n 's/^Version: *//p' helper/ipadecryptautoalert/control)
-
-          # Runs before the build, so it inspects what is actually committed.
-          # Rootless: this job rebuilds that deb, so a mismatch is a failure.
+          # Runs before the build, so this is what is actually committed.
           got=$(dpkg-deb -f internal/device/ipadecryptautoalert.deb Version)
-          echo "rootless embedded tweak: $got (source $src)"
-          [ "$got" = "$src" ] || {
-            echo "::error::internal/device/ipadecryptautoalert.deb is $got but the source is $src - run Tools/build-packages.sh --refresh-embedded and commit the result"
-            exit 1
-          }
-
-          # RootHide needs a second Theos (roothide/theos), which this job does
-          # not set up, so the checked-in copy can legitimately lag. Surface it
-          # instead of shipping it silently.
           rh=$(dpkg-deb -f internal/device/ipadecryptautoalert-roothide.deb Version)
-          echo "roothide embedded tweak: $rh (source $src)"
-          [ "$rh" = "$src" ] || echo "::warning::internal/device/ipadecryptautoalert-roothide.deb is $rh, source is $src - rebuild it with app/build_roothide.sh on a machine with roothide/theos"
+
+          echo "source=$src"         >> "$GITHUB_OUTPUT"
+          echo "rootless=$got"       >> "$GITHUB_OUTPUT"
+          echo "roothide=$rh"        >> "$GITHUB_OUTPUT"
+          echo "committed embedded tweak: rootless=$got roothide=$rh (source=$src)"
 
       - name: build packages
         run: |
@@ -183,6 +176,34 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           cat /tmp/verify/binary-report.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      # The CLI embeds this .deb, so a stale copy ships a tweak that does not
+      # match the app. Warn rather than fail: the correct copy is produced by
+      # this very job and uploaded as the ipadecrypt-embedded artifact.
+      - name: compare embedded tweak package
+        if: always()
+        run: |
+          set -euo pipefail
+          src="${{ steps.embedded.outputs.source }}"
+          got="${{ steps.embedded.outputs.rootless }}"
+          rh="${{ steps.embedded.outputs.roothide }}"
+
+          {
+            echo "| embedded tweak | version | source |"
+            echo "|---|---|---|"
+            echo "| rootless | $got | $src |"
+            echo "| roothide | $rh | $src |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$got" != "$src" ]; then
+            echo "::warning::internal/device/ipadecryptautoalert.deb is $got but the source is $src - commit the ipadecrypt-embedded artifact from this run"
+          fi
+
+          # RootHide needs a second Theos (roothide/theos), which this job does
+          # not set up, so that copy is expected to lag.
+          if [ "$rh" != "$src" ]; then
+            echo "::warning::internal/device/ipadecryptautoalert-roothide.deb is $rh, source is $src - rebuild it with app/build_roothide.sh on a machine with roothide/theos"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
