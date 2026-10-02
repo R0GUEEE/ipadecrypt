@@ -138,6 +138,27 @@ jobs:
           tar -xJf /tmp/iPhoneOS.sdk.tar.xz -C "$HOME/theos/sdks"
           ls "$HOME/theos/sdks"
 
+      - name: check embedded packages are fresh
+        run: |
+          set -euo pipefail
+          src=$(sed -n 's/^Version: *//p' helper/ipadecryptautoalert/control)
+
+          # Runs before the build, so it inspects what is actually committed.
+          # Rootless: this job rebuilds that deb, so a mismatch is a failure.
+          got=$(dpkg-deb -f internal/device/ipadecryptautoalert.deb Version)
+          echo "rootless embedded tweak: $got (source $src)"
+          [ "$got" = "$src" ] || {
+            echo "::error::internal/device/ipadecryptautoalert.deb is $got but the source is $src - run Tools/build-packages.sh --refresh-embedded and commit the result"
+            exit 1
+          }
+
+          # RootHide needs a second Theos (roothide/theos), which this job does
+          # not set up, so the checked-in copy can legitimately lag. Surface it
+          # instead of shipping it silently.
+          rh=$(dpkg-deb -f internal/device/ipadecryptautoalert-roothide.deb Version)
+          echo "roothide embedded tweak: $rh (source $src)"
+          [ "$rh" = "$src" ] || echo "::warning::internal/device/ipadecryptautoalert-roothide.deb is $rh, source is $src - rebuild it with app/build_roothide.sh on a machine with roothide/theos"
+
       - name: build packages
         run: |
           set -euo pipefail
