@@ -71,6 +71,11 @@ jobs:
       - name: go build
         run: go build -trimpath -ldflags="-s -w" -o ipadecrypt ./cmd/ipadecrypt
 
+      # The artifact above is only ./cmd/ipadecrypt, so the daemon and the
+      # on-device helper would not be compiled anywhere on a normal push.
+      - name: go build ./...
+        run: go build ./...
+
       - name: app policy tests
         if: runner.os == 'macOS'
         run: ./app/test.sh

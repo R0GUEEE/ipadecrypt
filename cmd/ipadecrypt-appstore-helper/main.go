@@ -24,6 +24,16 @@ var defaultRootDir = "/var/mobile/Documents/ipadecrypt"
 
 var rootDir = firstNonEmpty(strings.TrimSpace(os.Getenv("IPADECRYPT_ROOT_DIR")), defaultRootDir)
 
+// Device-session options are package level because the code paths that use
+// them - prepareAppStore, runAuthStatus, runAuthOnly - are not methods of
+// anything and cannot see main's locals.
+var (
+	deviceSessionFlag bool
+	deviceDSID        string
+	deviceStoreFront  string
+	deviceCookieJar   string
+)
+
 var errAuthRequired = errors.New("sign in with Apple ID required")
 
 type appleLoginFunc func(email, password, authCode string) error
@@ -46,8 +56,6 @@ func main() {
 	var authStatus bool
 	var externalVersionID string
 	var decryptHelper, decryptBundleID, decryptBundlePath, decryptOutIPA string
-	var deviceSessionFlag bool
-	var deviceDSID, deviceStoreFront, deviceCookieJar string
 	flag.StringVar(&bundleID, "bundle-id", "", "bundle identifier")
 	flag.StringVar(&trackID, "track-id", "", "App Store track ID")
 	flag.StringVar(&email, "email", "", "Apple ID email")
