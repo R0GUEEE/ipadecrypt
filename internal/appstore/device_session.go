@@ -3,7 +3,6 @@ package appstore
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -70,17 +69,147 @@ func (s *DeviceSession) Usable() bool {
 var deviceSessionCookieNames = []string{"myacinfo", "mz", "mzf_in", "itctx", "dsid"}
 
 // DefaultCookieJarPatterns are the places a signed-in App Store session can
-// live on iOS. The per-application jars come first because that is where the
-// App Store and the store daemons keep theirs.
+// live on iOS.
+//
+// The wildcard depth matters: the App Store app is an ordinary application
+// container, but the processes that actually hold the MZFinance session
+// (appstored, itunesstored, storeaccountd) are daemons, and daemon containers
+// live under a different class directory. Globbing every class is what makes
+// this work without knowing which process owns the session.
 func DefaultCookieJarPatterns() []string {
-	return []string{
-		"/var/mobile/Containers/Data/Application/*/Library/Cookies/Cookies.binarycookies",
-		"/private/var/mobile/Containers/Data/Application/*/Library/Cookies/Cookies.binarycookies",
-		"/var/mobile/Library/Cookies/Cookies.binarycookies",
-		"/private/var/mobile/Library/Cookies/Cookies.binarycookies",
-		"/rootfs/var/mobile/Containers/Data/Application/*/Library/Cookies/Cookies.binarycookies",
-		"/rootfs/var/mobile/Library/Cookies/Cookies.binarycookies",
+	patterns := []string{
+		"/var/mobile/Containers/Data/*/*/Library/Cookies/*.binarycookies",
+		"/var/mobile/Library/Cookies/*.binarycookies",
 	}
+
+	// /var is a symlink to /private/var on iOS, and RootHide relocates the
+	// whole tree under /rootfs. Scan the other spellings too rather than
+	// guessing which one the running jailbreak exposes.
+	extra := make([]string, 0, len(patterns)*2)
+	for _, pattern := range patterns {
+		extra = append(extra, "/private"+pattern, "/rootfs"+pattern)
+	}
+
+	return append(patterns, extra...)
+}
+
+// DeviceSessionReport records what a session scan saw, so a failure can name
+// its cause instead of reporting "no session".
+type DeviceSessionReport struct {
+	Patterns           []string
+	Found              []string
+	Readable           []string
+	WithSessionCookies []string
+	Session            *DeviceSession
+}
+
+// Reason explains why no session was produced. Empty when one was.
+func (r DeviceSessionReport) Reason() string {
+	if r.Session != nil {
+		return ""
+	}
+
+	switch {
+	case len(r.Patterns) == 0:
+		return "no cookie-jar paths were configured"
+	case len(r.Found) == 0:
+		return "no cookie jars matched the App Store paths - the helper cannot see any app container"
+	case len(r.Readable) == 0:
+		return fmt.Sprintf("%d cookie jars matched but none could be read - the helper is sandboxed away from them", len(r.Found))
+	case len(r.WithSessionCookies) == 0:
+		return fmt.Sprintf("%d cookie jars readable but none held an App Store session - open the App Store on the device while signed in", len(r.Readable))
+	default:
+		return "an App Store session was found but it carries no Apple ID (DSID) - pass --dsid to override"
+	}
+}
+
+// Describe renders the report for a terminal, one fact per line.
+func (r DeviceSessionReport) Describe() string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "patterns:            %d\n", len(r.Patterns))
+	fmt.Fprintf(&b, "cookie jars found:   %d\n", len(r.Found))
+	fmt.Fprintf(&b, "  readable:          %d\n", len(r.Readable))
+	fmt.Fprintf(&b, "  with session:      %d\n", len(r.WithSessionCookies))
+
+	for _, path := range r.Found {
+		b.WriteString("    " + path + "\n")
+	}
+
+	if r.Session != nil {
+		fmt.Fprintf(&b, "session:             dsidLength=%d storefront=%q cookies=%d\n",
+			len(r.Session.DSID), r.Session.StoreFront, len(r.Session.Cookies))
+
+		for _, c := range r.Session.Cookies {
+			fmt.Fprintf(&b, "    cookie %s (domain=%s)\n", c.Name, c.Domain)
+		}
+	} else {
+		fmt.Fprintf(&b, "session:             none (%s)\n", r.Reason())
+	}
+
+	return b.String()
+}
+
+// ScanDeviceSession reads every candidate jar and reports what it found,
+// whether or not a usable session came out of it.
+//
+// dsid and storeFront are caller-supplied overrides (the app gets them from
+// StoreServices and the device locale); they win over anything derived from
+// the cookies, and a session that ends up without a DSID is rejected because
+// the App Store needs the X-Dsid header.
+func ScanDeviceSession(patterns []string, dsid, storeFront, email string) DeviceSessionReport {
+	report := DeviceSessionReport{Patterns: patterns}
+	report.Found = DiscoverCookieJars(patterns)
+
+	var sources []string
+
+	for _, jarPath := range report.Found {
+		data, err := os.ReadFile(jarPath)
+		if err != nil {
+			continue
+		}
+
+		report.Readable = append(report.Readable, jarPath)
+
+		cookies, err := ParseBinaryCookies(data)
+		if err != nil {
+			continue
+		}
+
+		session := sessionFromCookies(cookies)
+		if len(session.Cookies) == 0 {
+			continue
+		}
+
+		report.WithSessionCookies = append(report.WithSessionCookies, jarPath)
+		sources = append(sources, jarPath)
+
+		if report.Session != nil {
+			continue
+		}
+
+		session.Sources = append([]string(nil), sources...)
+		session.DSID = firstNonEmpty(dsid, session.DSID)
+		session.StoreFront = storeFront
+		session.Email = email
+
+		if session.Usable() {
+			report.Session = session
+		}
+	}
+
+	return report
+}
+
+// LoadDeviceSession is ScanDeviceSession for callers that only want the
+// session, with the report's reason as the error.
+func LoadDeviceSession(jars []string, dsid, storeFront, email string) (*DeviceSession, error) {
+	report := ScanDeviceSession(jars, dsid, storeFront, email)
+	if report.Session != nil {
+		return report.Session, nil
+	}
+
+	return nil, fmt.Errorf("device session: %s", report.Reason())
 }
 
 // DiscoverCookieJars expands the given glob patterns, de-duplicating and
@@ -113,62 +242,6 @@ func DiscoverCookieJars(patterns []string) []string {
 	}
 
 	return out
-}
-
-// LoadDeviceSession reads the first cookie jar that yields a usable session.
-//
-// dsid and storeFront are caller-supplied overrides (the app gets them from
-// StoreServices / the device locale); they win over anything derived from the
-// cookies, and a session that ends up without a DSID is rejected because the
-// App Store needs the X-Dsid header.
-func LoadDeviceSession(jars []string, dsid, storeFront, email string) (*DeviceSession, error) {
-	if len(jars) == 0 {
-		return nil, errors.New("device session: no cookie jars found")
-	}
-
-	var (
-		lastErr error
-		sources []string
-	)
-
-	for _, jarPath := range jars {
-		data, err := os.ReadFile(jarPath)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		cookies, err := ParseBinaryCookies(data)
-		if err != nil {
-			lastErr = fmt.Errorf("%s: %w", jarPath, err)
-			continue
-		}
-
-		sources = append(sources, jarPath)
-
-		session := sessionFromCookies(cookies)
-		if len(session.Cookies) == 0 {
-			continue
-		}
-
-		session.Sources = sources
-		session.DSID = firstNonEmpty(dsid, session.DSID)
-		session.StoreFront = storeFront
-		session.Email = email
-
-		if !session.Usable() {
-			lastErr = fmt.Errorf("%s: session cookies found but no Apple ID (DSID)", jarPath)
-			continue
-		}
-
-		return session, nil
-	}
-
-	if lastErr == nil {
-		lastErr = errors.New("device session: no App Store session cookies in any cookie jar")
-	}
-
-	return nil, lastErr
 }
 
 func sessionFromCookies(cookies []*http.Cookie) *DeviceSession {

@@ -251,3 +251,97 @@ func TestDeviceSessionSnapshotDoesNotLeakValues(t *testing.T) {
 		t.Fatalf("snapshot leaked a cookie value: %s", snapshot)
 	}
 }
+
+func TestScanDeviceSessionExplainsEachFailure(t *testing.T) {
+	dir := t.TempDir()
+
+	sessionPayload, err := plist.Marshal(map[string]any{"DsPersonId": "1234567890"}, plist.XMLFormat)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	plainJar := filepath.Join(dir, "plain.binarycookies")
+	writeJar(t, plainJar, []binaryCookieFixture{
+		{domain: ".example.com", name: "nope", path: "/", value: "x"},
+	})
+
+	// Session cookies, but nothing that identifies the account.
+	noDSIDJar := filepath.Join(dir, "nodsaid.binarycookies")
+	writeJar(t, noDSIDJar, []binaryCookieFixture{
+		{domain: ".apple.com", name: "myacinfo", path: "/", value: "not-a-plist"},
+	})
+
+	sessionJar := filepath.Join(dir, "session.binarycookies")
+	writeJar(t, sessionJar, []binaryCookieFixture{
+		{domain: ".apple.com", name: "myacinfo", path: "/", value: base64.StdEncoding.EncodeToString(sessionPayload)},
+	})
+
+	cases := []struct {
+		name     string
+		patterns []string
+		want     string
+	}{
+		{"no patterns", nil, "no cookie-jar paths were configured"},
+		{"nothing matched", []string{filepath.Join(dir, "missing-*.binarycookies")}, "no cookie jars matched"},
+		{"readable but no session", []string{plainJar}, "none held an App Store session"},
+		{"session without a DSID", []string{noDSIDJar}, "carries no Apple ID (DSID)"},
+	}
+
+	for _, tc := range cases {
+		report := ScanDeviceSession(tc.patterns, "", "", "")
+		if report.Session != nil {
+			t.Fatalf("%s: expected no session", tc.name)
+		}
+
+		if !strings.Contains(report.Reason(), tc.want) {
+			t.Errorf("%s: reason = %q, want it to contain %q", tc.name, report.Reason(), tc.want)
+		}
+
+		if _, err := LoadDeviceSession(tc.patterns, "", "", ""); err == nil {
+			t.Errorf("%s: LoadDeviceSession should have failed", tc.name)
+		}
+	}
+
+	report := ScanDeviceSession([]string{sessionJar}, "", "143441", "")
+	if report.Session == nil {
+		t.Fatalf("expected a session, got: %s", report.Reason())
+	}
+
+	if report.Reason() != "" {
+		t.Fatalf("Reason() = %q, want empty for a good session", report.Reason())
+	}
+
+	if len(report.WithSessionCookies) != 1 {
+		t.Fatalf("WithSessionCookies = %v", report.WithSessionCookies)
+	}
+
+	if !strings.Contains(report.Describe(), "session:") {
+		t.Fatal("Describe() should report the session")
+	}
+}
+
+func TestScanDeviceSessionAcceptsAnExplicitDSIDWhenCookiesLackOne(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nodsaid.binarycookies")
+
+	writeJar(t, path, []binaryCookieFixture{
+		{domain: ".apple.com", name: "myacinfo", path: "/", value: "not-a-plist"},
+	})
+
+	report := ScanDeviceSession([]string{path}, "5555555555", "", "")
+	if report.Session == nil {
+		t.Fatalf("expected a session with an explicit DSID, got: %s", report.Reason())
+	}
+
+	if report.Session.DSID != "5555555555" {
+		t.Fatalf("DSID = %q, want the explicit override", report.Session.DSID)
+	}
+}
+
+func writeJar(t *testing.T, path string, cookies []binaryCookieFixture) {
+	t.Helper()
+
+	if err := os.WriteFile(path, buildBinaryCookieFile(t, cookies), 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}

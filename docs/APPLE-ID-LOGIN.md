@@ -79,25 +79,55 @@ instead of a bare "login failed".
 
 ## Verifying it on a device
 
+The scan prints what it looked at, so there is no guessing:
+
 ```sh
 # as root on the phone
-/var/jb/Applications/ipadecrypt.app/appstore-helper.arm64 --auth-status --device-session
+/var/jb/Applications/ipadecrypt.app/appstore-helper.arm64 --device-session-report
 ```
 
-Authenticated looks like:
+```
+patterns:            6
+cookie jars found:   214
+  readable:          210
+  with session:      1
+session:             dsidLength=10 storefront="143441" cookies=3
+```
+
+`--auth-status --device-session` is the same check in event form, which is what
+the app runs:
+
+```sh
+/var/jb/Applications/ipadecrypt.app/appstore-helper.arm64 --auth-status --device-session
+```
 
 ```
 @evt phase="device-session" dsidLength="10" storefront="143441" cookies="3" jars="1"
 @evt phase="done" name="authenticated"
 ```
 
-Common failures:
+Common failures, in the order the scan can hit them:
 
-| Event | Meaning |
+| Reason | Meaning |
 |---|---|
-| `device-session-failed reason="no cookie jars found"` | nothing matched the glob patterns - the app may be sandboxed away from the store containers |
-| `… reason="session cookies found but no Apple ID (DSID)"` | cookies are there but StoreServices did not answer; pass `--dsid` explicitly |
-| `… reason="no App Store session cookies in any cookie jar"` | the device has never opened the App Store, or its session expired - open the App Store once and sign in |
+| `no cookie jars matched the App Store paths` | the helper cannot see any app container - it is sandboxed away from them |
+| `N cookie jars matched but none could be read` | the files exist but are not readable by the helper's user |
+| `N cookie jars readable but none held an App Store session` | the device has no App Store session - sign in and open the App Store once |
+| `an App Store session was found but it carries no Apple ID (DSID)` | cookies are there but StoreServices did not report an account id; pass `--dsid` explicitly |
 
 The DSID is a personal identifier: it is never written to the app log, only its
-length is.
+length is, and `--device-session-report` prints the cookie *names* it found but
+never their values.
+
+## Why a password sign-in reports HTTP 404
+
+If the device session is unavailable the app used to fall back to a password
+prompt. That request cannot succeed, and Apple's refusal is cryptic: the bag's
+`authenticateAccount` (`https://buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/authenticate`)
+answers an unsigned POST with a **404 and an HTML body**, which used to surface
+as `failed to unmarshal xml ... unexpected hex digit 'h'`.
+
+`internal/appstore` now recognises that shape and returns `ErrSignatureRequired`
+(helper exit code 22, `reason=signature-required`) instead. The app no longer
+offers the prompt when the device-session scan already explained the problem; it
+shows the reason and what to do about it.

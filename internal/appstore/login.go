@@ -8,6 +8,35 @@ import (
 	"strings"
 )
 
+// ErrSignatureRequired reports that Apple refused an unsigned sign-in request.
+//
+// The App Store's authenticate endpoint requires the body to carry an
+// X-Apple-ActionSignature, and the only thing that can produce one is SAP -
+// which runs Apple's macOS CommerceKit inside a Unicorn x86_64 VM whose library
+// ships as a PyPI wheel with no iOS build. On a phone there is no way to sign in
+// with a password; the device's own App Store session is the only path (see
+// device_session.go).
+var ErrSignatureRequired = errors.New("Apple requires a signed sign-in request (X-Apple-ActionSignature)")
+
+// signatureRequiredError turns Apple's transport-level refusal into something
+// actionable. An unsigned authenticate gets a bare 404/403 HTML page instead of
+// a plist, which would otherwise surface as an opaque plist parse failure.
+func signatureRequiredError(err error) error {
+	var decodeErr *ResponseDecodeError
+	if !errors.As(err, &decodeErr) {
+		return nil
+	}
+
+	switch decodeErr.StatusCode {
+	case http.StatusNotFound, http.StatusForbidden, http.StatusUnauthorized:
+	default:
+		return nil
+	}
+
+	return fmt.Errorf("%w: Apple answered HTTP %d (%s) instead of a plist; on iOS the device's own App Store session is the only supported path",
+		ErrSignatureRequired, decodeErr.StatusCode, decodeErr.ContentType)
+}
+
 type loginResult struct {
 	FailureType         string `plist:"failureType,omitempty"`
 	CustomerMessage     string `plist:"customerMessage,omitempty"`
@@ -75,6 +104,10 @@ func (c *Client) Login(email, password, authCode string) (*Account, error) {
 				url = authEndpoint
 				discoveryRetried = true
 				continue
+			}
+
+			if rejection := signatureRequiredError(err); rejection != nil {
+				return nil, rejection
 			}
 
 			return nil, fmt.Errorf("login: %w", err)
