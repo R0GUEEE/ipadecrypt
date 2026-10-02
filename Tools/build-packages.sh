@@ -117,6 +117,17 @@ chmod +x "$ROOT/app/Resources/helper.arm64"
 
 # --- packages ----------------------------------------------------------------
 VERSION=$(sed -n 's/^Version: *//p' "$ROOT/app/control")
+TWEAK_VERSION=$(sed -n 's/^Version: *//p' "$ROOT/helper/ipadecryptautoalert/control")
+[ -n "$VERSION" ] || { echo "no Version field in app/control" >&2; exit 1; }
+
+# The CLI embeds the tweak .deb verbatim, so the two control files have to
+# agree. Shipping a stale tweak alongside a fresh app is silent otherwise.
+if [ "$VERSION" != "$TWEAK_VERSION" ]; then
+	echo "version mismatch: app/control=$VERSION, tweak/control=$TWEAK_VERSION" >&2
+	echo "update both control files (and app/Resources/Info.plist) together" >&2
+	exit 1
+fi
+
 DIST="$ROOT/dist"
 rm -rf "$DIST"
 mkdir -p "$DIST"

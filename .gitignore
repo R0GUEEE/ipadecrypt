@@ -2,6 +2,8 @@
 *.md
 !README.md
 !BUILDING.md
+!docs/
+!docs/*.md
 !.github/
 !.github/ISSUE_TEMPLATE/
 !.github/ISSUE_TEMPLATE/bug_report.md
