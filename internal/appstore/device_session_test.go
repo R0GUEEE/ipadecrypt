@@ -345,3 +345,90 @@ func writeJar(t *testing.T, path string, cookies []binaryCookieFixture) {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
+
+func TestScanDeviceSessionReportsUndecodableJars(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "garbage.binarycookies")
+
+	if err := os.WriteFile(path, []byte("this is not a cook file"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	report := ScanDeviceSession([]string{path}, "", "", "")
+
+	if report.Session != nil {
+		t.Fatal("expected no session")
+	}
+
+	if len(report.Jars) != 0 {
+		t.Fatalf("Jars = %v, want none", report.Jars)
+	}
+
+	if len(report.Failed) != 1 {
+		t.Fatalf("Failed = %v, want the undecodable jar", report.Failed)
+	}
+
+	if !strings.Contains(report.Reason(), "none decoded") {
+		t.Errorf("reason = %q, want it to name the decode failure", report.Reason())
+	}
+
+	if !strings.Contains(report.Describe(), "undecodable") {
+		t.Error("Describe() should list the undecodable jar")
+	}
+}
+
+func TestScanDeviceSessionNamesTheCookiesItSaw(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "other.binarycookies")
+
+	writeJar(t, path, []binaryCookieFixture{
+		{domain: ".apple.com", name: "somethingElse", path: "/", value: "x"},
+		{domain: ".apple.com", name: "anotherOne", path: "/", value: "y"},
+	})
+
+	report := ScanDeviceSession([]string{path}, "", "", "")
+	if report.Session != nil {
+		t.Fatal("expected no session")
+	}
+
+	reason := report.Reason()
+
+	for _, name := range []string{"somethingElse", "anotherOne"} {
+		if !strings.Contains(reason, name) {
+			t.Errorf("reason %q should name the cookie %q", reason, name)
+		}
+	}
+
+	if len(report.Jars) != 1 || report.Jars[0].Cookies != 2 {
+		t.Fatalf("Jars = %v, want one jar with two cookies", report.Jars)
+	}
+}
+
+func TestPatternMatchesCountsPerPattern(t *testing.T) {
+	dir := t.TempDir()
+	appDir := filepath.Join(dir, "Data", "Application", "AAAA", "Library", "Cookies")
+
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(appDir, "Cookies.binarycookies"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	hit := filepath.Join(dir, "Data", "*", "*", "Library", "Cookies", "*.binarycookies")
+	miss := filepath.Join(dir, "Nowhere", "*", "*.binarycookies")
+
+	matches := PatternMatches([]string{hit, miss})
+	if len(matches) != 2 {
+		t.Fatalf("got %d matches, want 2", len(matches))
+	}
+
+	if matches[0].Matches != 1 {
+		t.Errorf("hit pattern matched %d files, want 1", matches[0].Matches)
+	}
+
+	if matches[1].Matches != 0 {
+		t.Errorf("miss pattern matched %d files, want 0", matches[1].Matches)
+	}
+}

@@ -87,12 +87,27 @@ The scan prints what it looked at, so there is no guessing:
 ```
 
 ```
-patterns:            6
-cookie jars found:   214
-  readable:          210
+patterns:            9
+cookie jars found:   24
+  readable:          24
+  decoded:           24
   with session:      1
+    pattern /var/mobile/Containers/Data/*/*/Library/Cookies/*.binarycookies -> 24 files
+    pattern /var/containers/Data/*/*/Library/Cookies/*.binarycookies -> 0 files
+    pattern /var/mobile/Library/Cookies/*.binarycookies -> 0 files
+    /var/mobile/Containers/Data/Application/5B1C.../Library/Cookies/Cookies.binarycookies (7 cookies: dsid itctx mz myacinfo ...)
+cookie names seen:   dsid(3) itctx(1) mz(1) myacinfo(3) ...
 session:             dsidLength=10 storefront="143441" cookies=3
 ```
+
+Three counts matter when it fails, and each points somewhere different:
+
+- **found: 0** - the globs are outside what the helper can see.
+- **decoded: 0** while `readable` is not - the files are not in the format this
+  build parses, which is a bug here, not on the device.
+- **cookie names seen** - if `myacinfo` is in the list but no session was built,
+  the selection is wrong; if it is absent, the device keeps its session
+  somewhere these paths do not reach.
 
 `--auth-status --device-session` is the same check in event form, which is what
 the app runs:

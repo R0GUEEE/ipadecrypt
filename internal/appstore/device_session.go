@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"howett.net/plist"
@@ -78,7 +79,11 @@ var deviceSessionCookieNames = []string{"myacinfo", "mz", "mzf_in", "itctx", "ds
 // this work without knowing which process owns the session.
 func DefaultCookieJarPatterns() []string {
 	patterns := []string{
+		// User apps: /var/mobile/Containers/Data/Application/<uuid>.
 		"/var/mobile/Containers/Data/*/*/Library/Cookies/*.binarycookies",
+		// System daemons (appstored, itunesstored, storeaccountd) keep their
+		// containers in a separate tree entirely.
+		"/var/containers/Data/*/*/Library/Cookies/*.binarycookies",
 		"/var/mobile/Library/Cookies/*.binarycookies",
 	}
 
@@ -91,125 +96,6 @@ func DefaultCookieJarPatterns() []string {
 	}
 
 	return append(patterns, extra...)
-}
-
-// DeviceSessionReport records what a session scan saw, so a failure can name
-// its cause instead of reporting "no session".
-type DeviceSessionReport struct {
-	Patterns           []string
-	Found              []string
-	Readable           []string
-	WithSessionCookies []string
-	Session            *DeviceSession
-}
-
-// Reason explains why no session was produced. Empty when one was.
-func (r DeviceSessionReport) Reason() string {
-	if r.Session != nil {
-		return ""
-	}
-
-	switch {
-	case len(r.Patterns) == 0:
-		return "no cookie-jar paths were configured"
-	case len(r.Found) == 0:
-		return "no cookie jars matched the App Store paths - the helper cannot see any app container"
-	case len(r.Readable) == 0:
-		return fmt.Sprintf("%d cookie jars matched but none could be read - the helper is sandboxed away from them", len(r.Found))
-	case len(r.WithSessionCookies) == 0:
-		return fmt.Sprintf("%d cookie jars readable but none held an App Store session - open the App Store on the device while signed in", len(r.Readable))
-	default:
-		return "an App Store session was found but it carries no Apple ID (DSID) - pass --dsid to override"
-	}
-}
-
-// Describe renders the report for a terminal, one fact per line.
-func (r DeviceSessionReport) Describe() string {
-	var b strings.Builder
-
-	fmt.Fprintf(&b, "patterns:            %d\n", len(r.Patterns))
-	fmt.Fprintf(&b, "cookie jars found:   %d\n", len(r.Found))
-	fmt.Fprintf(&b, "  readable:          %d\n", len(r.Readable))
-	fmt.Fprintf(&b, "  with session:      %d\n", len(r.WithSessionCookies))
-
-	for _, path := range r.Found {
-		b.WriteString("    " + path + "\n")
-	}
-
-	if r.Session != nil {
-		fmt.Fprintf(&b, "session:             dsidLength=%d storefront=%q cookies=%d\n",
-			len(r.Session.DSID), r.Session.StoreFront, len(r.Session.Cookies))
-
-		for _, c := range r.Session.Cookies {
-			fmt.Fprintf(&b, "    cookie %s (domain=%s)\n", c.Name, c.Domain)
-		}
-	} else {
-		fmt.Fprintf(&b, "session:             none (%s)\n", r.Reason())
-	}
-
-	return b.String()
-}
-
-// ScanDeviceSession reads every candidate jar and reports what it found,
-// whether or not a usable session came out of it.
-//
-// dsid and storeFront are caller-supplied overrides (the app gets them from
-// StoreServices and the device locale); they win over anything derived from
-// the cookies, and a session that ends up without a DSID is rejected because
-// the App Store needs the X-Dsid header.
-func ScanDeviceSession(patterns []string, dsid, storeFront, email string) DeviceSessionReport {
-	report := DeviceSessionReport{Patterns: patterns}
-	report.Found = DiscoverCookieJars(patterns)
-
-	var sources []string
-
-	for _, jarPath := range report.Found {
-		data, err := os.ReadFile(jarPath)
-		if err != nil {
-			continue
-		}
-
-		report.Readable = append(report.Readable, jarPath)
-
-		cookies, err := ParseBinaryCookies(data)
-		if err != nil {
-			continue
-		}
-
-		session := sessionFromCookies(cookies)
-		if len(session.Cookies) == 0 {
-			continue
-		}
-
-		report.WithSessionCookies = append(report.WithSessionCookies, jarPath)
-		sources = append(sources, jarPath)
-
-		if report.Session != nil {
-			continue
-		}
-
-		session.Sources = append([]string(nil), sources...)
-		session.DSID = firstNonEmpty(dsid, session.DSID)
-		session.StoreFront = storeFront
-		session.Email = email
-
-		if session.Usable() {
-			report.Session = session
-		}
-	}
-
-	return report
-}
-
-// LoadDeviceSession is ScanDeviceSession for callers that only want the
-// session, with the report's reason as the error.
-func LoadDeviceSession(jars []string, dsid, storeFront, email string) (*DeviceSession, error) {
-	report := ScanDeviceSession(jars, dsid, storeFront, email)
-	if report.Session != nil {
-		return report.Session, nil
-	}
-
-	return nil, fmt.Errorf("device session: %s", report.Reason())
 }
 
 // DiscoverCookieJars expands the given glob patterns, de-duplicating and
@@ -242,6 +128,271 @@ func DiscoverCookieJars(patterns []string) []string {
 	}
 
 	return out
+}
+
+// DeviceSessionReport records what a session scan saw, so a failure can name
+// its cause instead of reporting "no session".
+type DeviceSessionReport struct {
+	Patterns           []string
+	Found              []string
+	Readable           []string
+	WithSessionCookies []string
+	// Jars describes every readable jar that decoded, including ones holding
+	// nothing useful: when the scan finds no session, the cookie names in here
+	// are what says whether the session is somewhere else or named something
+	// else.
+	Jars []JarSummary
+	// Failed lists readable jars that would not decode at all.
+	Failed []string
+	// PatternMatches says how many files each glob matched, so a report can
+	// show which places were actually consulted.
+	PatternMatches []PatternMatch
+	Session        *DeviceSession
+}
+
+// PatternMatch records how many files one glob matched.
+type PatternMatch struct {
+	Pattern string
+	Matches int
+	Err     string
+}
+
+// PatternMatches evaluates each pattern on its own. A pattern that matches
+// nothing is the difference between "the session is not there" and "we never
+// looked".
+func PatternMatches(patterns []string) []PatternMatch {
+	out := make([]PatternMatch, 0, len(patterns))
+
+	for _, pattern := range patterns {
+		match := PatternMatch{Pattern: pattern}
+
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			match.Err = err.Error()
+		} else {
+			match.Matches = len(matches)
+		}
+
+		out = append(out, match)
+	}
+
+	return out
+}
+
+// JarSummary is one decoded cookie jar.
+type JarSummary struct {
+	Path    string
+	Cookies int
+	Names   []string
+}
+
+// CookieNameCounts tallies cookie names across every decoded jar. A candidate
+// session cookie that shows up here but not in the session is a selection bug;
+// one that does not show up at all means the session is not in these files.
+func (r DeviceSessionReport) CookieNameCounts() map[string]int {
+	counts := map[string]int{}
+
+	for _, jar := range r.Jars {
+		for _, name := range jar.Names {
+			counts[name]++
+		}
+	}
+
+	return counts
+}
+
+// Reason explains why no session was produced. Empty when one was.
+func (r DeviceSessionReport) Reason() string {
+	if r.Session != nil {
+		return ""
+	}
+
+	switch {
+	case len(r.Patterns) == 0:
+		return "no cookie-jar paths were configured"
+	case len(r.Found) == 0:
+		return "no cookie jars matched the App Store paths - the helper cannot see any app container"
+	case len(r.Readable) == 0:
+		return fmt.Sprintf("%d cookie jars matched but none could be read - the helper is sandboxed away from them", len(r.Found))
+	case len(r.Jars) == 0:
+		return fmt.Sprintf("%d cookie jars were readable but none decoded - the on-disk format is not what this build parses", len(r.Readable))
+	case len(r.WithSessionCookies) == 0:
+		return fmt.Sprintf("%d cookie jars decoded but none held an App Store session; cookie names seen: %s",
+			len(r.Jars), summariseCookieNames(r.CookieNameCounts()))
+	default:
+		return "an App Store session was found but it carries no Apple ID (DSID) - pass --dsid to override"
+	}
+}
+
+// Describe renders the report for a terminal, one fact per line.
+func (r DeviceSessionReport) Describe() string {
+	const maxListed = 40
+
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "patterns:            %d\n", len(r.Patterns))
+	fmt.Fprintf(&b, "cookie jars found:   %d\n", len(r.Found))
+	fmt.Fprintf(&b, "  readable:          %d\n", len(r.Readable))
+	fmt.Fprintf(&b, "  decoded:           %d\n", len(r.Jars))
+	fmt.Fprintf(&b, "  with session:      %d\n", len(r.WithSessionCookies))
+
+	for _, match := range r.PatternMatches {
+		if match.Err != "" {
+			fmt.Fprintf(&b, "    pattern %s -> error: %s\n", match.Pattern, match.Err)
+			continue
+		}
+
+		fmt.Fprintf(&b, "    pattern %s -> %d files\n", match.Pattern, match.Matches)
+	}
+
+	listed := 0
+
+	for _, jar := range r.Jars {
+		if jar.Cookies == 0 {
+			continue
+		}
+
+		if listed == maxListed {
+			fmt.Fprintf(&b, "    ... more jars with cookies omitted\n")
+			break
+		}
+
+		fmt.Fprintf(&b, "    %s (%d cookies: %s)\n", jar.Path, jar.Cookies, strings.Join(jar.Names, " "))
+		listed++
+	}
+
+	for _, path := range r.Failed {
+		fmt.Fprintf(&b, "    undecodable: %s\n", path)
+	}
+
+	names := r.CookieNameCounts()
+	if len(names) > 0 {
+		fmt.Fprintf(&b, "cookie names seen:   %s\n", summariseCookieNames(names))
+	}
+
+	if r.Session != nil {
+		fmt.Fprintf(&b, "session:             dsidLength=%d storefront=%q cookies=%d\n",
+			len(r.Session.DSID), r.Session.StoreFront, len(r.Session.Cookies))
+
+		for _, c := range r.Session.Cookies {
+			fmt.Fprintf(&b, "    cookie %s (domain=%s)\n", c.Name, c.Domain)
+		}
+	} else {
+		fmt.Fprintf(&b, "session:             none (%s)\n", r.Reason())
+	}
+
+	return b.String()
+}
+
+func summariseCookieNames(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "(none)"
+	}
+
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s(%d)", name, counts[name]))
+	}
+
+	const maxNames = 40
+	if len(parts) > maxNames {
+		parts = append(parts[:maxNames], fmt.Sprintf("... and %d more", len(names)-maxNames))
+	}
+
+	return strings.Join(parts, " ")
+}
+
+// ScanDeviceSession reads every candidate jar and reports what it found,
+// whether or not a usable session came out of it.
+//
+// dsid and storeFront are caller-supplied overrides (the app gets them from
+// StoreServices and the device locale); they win over anything derived from
+// the cookies, and a session that ends up without a DSID is rejected because
+// the App Store needs the X-Dsid header.
+func ScanDeviceSession(patterns []string, dsid, storeFront, email string) DeviceSessionReport {
+	report := DeviceSessionReport{Patterns: patterns}
+	report.PatternMatches = PatternMatches(patterns)
+	report.Found = DiscoverCookieJars(patterns)
+
+	var sources []string
+
+	for _, jarPath := range report.Found {
+		data, err := os.ReadFile(jarPath)
+		if err != nil {
+			continue
+		}
+
+		report.Readable = append(report.Readable, jarPath)
+
+		cookies, err := ParseBinaryCookies(data)
+		if err != nil {
+			report.Failed = append(report.Failed, jarPath)
+			continue
+		}
+
+		report.Jars = append(report.Jars, describeJar(jarPath, cookies))
+
+		session := sessionFromCookies(cookies)
+		if len(session.Cookies) == 0 {
+			continue
+		}
+
+		report.WithSessionCookies = append(report.WithSessionCookies, jarPath)
+		sources = append(sources, jarPath)
+
+		if report.Session != nil {
+			continue
+		}
+
+		session.Sources = append([]string(nil), sources...)
+		session.DSID = firstNonEmpty(dsid, session.DSID)
+		session.StoreFront = storeFront
+		session.Email = email
+
+		if session.Usable() {
+			report.Session = session
+		}
+	}
+
+	return report
+}
+
+func describeJar(path string, cookies []*http.Cookie) JarSummary {
+	summary := JarSummary{Path: path, Cookies: len(cookies)}
+
+	seen := map[string]bool{}
+
+	for _, c := range cookies {
+		if seen[c.Name] {
+			continue
+		}
+
+		seen[c.Name] = true
+
+		summary.Names = append(summary.Names, c.Name)
+	}
+
+	sort.Strings(summary.Names)
+
+	return summary
+}
+
+// LoadDeviceSession is ScanDeviceSession for callers that only want the
+// session, with the report's reason as the error.
+func LoadDeviceSession(jars []string, dsid, storeFront, email string) (*DeviceSession, error) {
+	report := ScanDeviceSession(jars, dsid, storeFront, email)
+	if report.Session != nil {
+		return report.Session, nil
+	}
+
+	return nil, fmt.Errorf("device session: %s", report.Reason())
 }
 
 func sessionFromCookies(cookies []*http.Cookie) *DeviceSession {

@@ -99,10 +99,10 @@ Refer to [BUILDING.md](BUILDING.md) for helper and release-style build details.
 The release includes `.deb` packages for the on-device app and the optional
 auto-confirm tweak:
 
-- `com.korboy.ipadecrypt_0.7.6-korboy.1_iphoneos-arm64.deb`
-- `com.korboy.ipadecrypt_0.7.6-korboy.1_iphoneos-arm64e.deb` for RootHide
-- `com.korboy.ipadecryptautoalert_0.7.6-korboy.1_iphoneos-arm64.deb`
-- `com.korboy.ipadecryptautoalert_0.7.6-korboy.1_iphoneos-arm64e.deb` for RootHide
+- `com.korboy.ipadecrypt_0.7.7-korboy.1_iphoneos-arm64.deb`
+- `com.korboy.ipadecrypt_0.7.7-korboy.1_iphoneos-arm64e.deb` for RootHide
+- `com.korboy.ipadecryptautoalert_0.7.7-korboy.1_iphoneos-arm64.deb`
+- `com.korboy.ipadecryptautoalert_0.7.7-korboy.1_iphoneos-arm64e.deb` for RootHide
 
 For iOS 16.7.x install the `iphoneos-arm64` pair - that is the rootless build
 palera1n needs.
