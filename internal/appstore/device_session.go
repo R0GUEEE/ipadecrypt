@@ -98,6 +98,38 @@ func DefaultCookieJarPatterns() []string {
 	return append(patterns, extra...)
 }
 
+// DiscoverCookieJars expands the given glob patterns, de-duplicating and
+// keeping the first-seen order so callers can present a stable "most likely
+// source" list.
+func DiscoverCookieJars(patterns []string) []string {
+	seen := map[string]bool{}
+
+	var out []string
+
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+
+		for _, match := range matches {
+			if seen[match] {
+				continue
+			}
+
+			if info, err := os.Stat(match); err != nil || info.IsDir() {
+				continue
+			}
+
+			seen[match] = true
+
+			out = append(out, match)
+		}
+	}
+
+	return out
+}
+
 // DeviceSessionReport records what a session scan saw, so a failure can name
 // its cause instead of reporting "no session".
 type DeviceSessionReport struct {
