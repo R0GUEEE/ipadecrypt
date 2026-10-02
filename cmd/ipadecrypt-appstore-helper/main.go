@@ -32,6 +32,8 @@ var (
 	deviceDSID        string
 	deviceStoreFront  string
 	deviceCookieJar   string
+
+	deviceSessionReport bool
 )
 
 var errAuthRequired = errors.New("sign in with Apple ID required")
@@ -72,11 +74,18 @@ func main() {
 	flag.StringVar(&deviceDSID, "dsid", "", "Directory Services id to pair with the device session")
 	flag.StringVar(&deviceStoreFront, "storefront", "", "numeric App Store storefront for the device session")
 	flag.StringVar(&deviceCookieJar, "cookie-jar", "", "explicit Cookies.binarycookies path to read the device session from")
+	flag.BoolVar(&deviceSessionReport, "device-session-report", false,
+		"print what the device-session scan found, then exit")
 	flag.StringVar(&decryptHelper, "decrypt-helper", "", "run decrypt helper and relay events")
 	flag.StringVar(&decryptBundleID, "decrypt-bundle-id", "", "bundle identifier for decrypt helper")
 	flag.StringVar(&decryptBundlePath, "decrypt-bundle-path", "", "installed bundle path for decrypt helper")
 	flag.StringVar(&decryptOutIPA, "decrypt-out-ipa", "", "output IPA path for decrypt helper")
 	flag.Parse()
+
+	if deviceSessionReport {
+		runDeviceSessionReport()
+		return
+	}
 
 	if decryptHelper != "" {
 		if err := runDecryptHelper(decryptHelper, decryptBundleID, decryptBundlePath, decryptOutIPA); err != nil {
@@ -99,6 +108,9 @@ func main() {
 			if errors.Is(err, appstore.ErrAuthCodeRequired) {
 				code = 21
 				reason = "auth-code-required"
+			} else if errors.Is(err, appstore.ErrSignatureRequired) {
+				code = 22
+				reason = "signature-required"
 			} else if errors.Is(err, errAuthRequired) || errors.Is(err, appstore.ErrInvalidCredentials) {
 				code = 20
 				reason = "auth-required"
@@ -139,6 +151,9 @@ func main() {
 		if errors.Is(err, appstore.ErrAuthCodeRequired) {
 			code = 21
 			reason = "auth-code-required"
+		} else if errors.Is(err, appstore.ErrSignatureRequired) {
+			code = 22
+			reason = "signature-required"
 		} else if errors.Is(err, errAuthRequired) || errors.Is(err, appstore.ErrInvalidCredentials) {
 			code = 20
 			reason = "auth-required"
@@ -163,7 +178,7 @@ func runAuthStatus() error {
 
 			return nil
 		} else {
-			emit("phase", "device-session-failed", "reason", err.Error())
+			emitDeviceSessionFailure(resolvedReport)
 		}
 	}
 
@@ -214,7 +229,7 @@ func runAuthOnly(email, password, authCode string) error {
 
 			return nil
 		} else {
-			emit("phase", "device-session-failed", "reason", err.Error())
+			emitDeviceSessionFailure(resolvedReport)
 		}
 	}
 
@@ -329,13 +344,39 @@ func run(bundleID, trackID, email, password, authCode, externalVersionID string)
 }
 
 // deviceSessionOnce caches the resolved device session for the process: the
-// cookie-jar scan touches dozens of files and each command needs it at most
+// cookie-jar scan touches hundreds of files and each command needs it at most
 // once.
 var (
-	deviceSessionOnce  sync.Once
-	resolvedSession    *appstore.DeviceSession
-	resolvedSessionErr error
+	deviceSessionOnce sync.Once
+	resolvedReport    appstore.DeviceSessionReport
 )
+
+// resolveStoreFront accepts either the numeric id the device reports or a
+// two-letter country code, which is all the app can get without private
+// frameworks.
+func resolveStoreFront() string {
+	storeFront := strings.TrimSpace(deviceStoreFront)
+	if storeFront == "" {
+		return ""
+	}
+
+	if resolved, err := appstore.ResolveStorefront(storeFront); err == nil {
+		return resolved
+	}
+
+	return ""
+}
+
+// deviceSessionPatterns are the cookie jars to scan: an explicit override
+// first, then every place iOS keeps an App Store session.
+func deviceSessionPatterns() []string {
+	patterns := make([]string, 0, 8)
+	if strings.TrimSpace(deviceCookieJar) != "" {
+		patterns = append(patterns, deviceCookieJar)
+	}
+
+	return append(patterns, appstore.DefaultCookieJarPatterns()...)
+}
 
 // resolveDeviceSession reads the App Store session the phone already has.
 //
@@ -347,29 +388,44 @@ var (
 // supported path here.
 func resolveDeviceSession() (*appstore.DeviceSession, error) {
 	deviceSessionOnce.Do(func() {
-		jars := make([]string, 0, 8)
-		if deviceCookieJar != "" {
-			jars = append(jars, deviceCookieJar)
-		}
-
-		jars = append(jars, appstore.DiscoverCookieJars(appstore.DefaultCookieJarPatterns())...)
-
-		// --storefront accepts either the numeric id the device reports or a
-		// two-letter country code, which is all the app can get without
-		// touching private frameworks.
-		storeFront := strings.TrimSpace(deviceStoreFront)
-		if storeFront != "" {
-			if resolved, err := appstore.ResolveStorefront(storeFront); err == nil {
-				storeFront = resolved
-			} else {
-				storeFront = ""
-			}
-		}
-
-		resolvedSession, resolvedSessionErr = appstore.LoadDeviceSession(jars, deviceDSID, storeFront, "")
+		resolvedReport = appstore.ScanDeviceSession(deviceSessionPatterns(), deviceDSID, resolveStoreFront(), "")
 	})
 
-	return resolvedSession, resolvedSessionErr
+	if resolvedReport.Session != nil {
+		return resolvedReport.Session, nil
+	}
+
+	return nil, fmt.Errorf("device session: %s", resolvedReport.Reason())
+}
+
+// emitDeviceSessionFailure explains a failed scan in the event stream, so the
+// app can show which of the four possible causes it hit instead of a bare
+// "sign-in required".
+func emitDeviceSessionFailure(report appstore.DeviceSessionReport) {
+	emit("phase", "device-session-failed",
+		"reason", report.Reason(),
+		"found", strconv.Itoa(len(report.Found)),
+		"readable", strconv.Itoa(len(report.Readable)),
+		"sessions", strconv.Itoa(len(report.WithSessionCookies)))
+}
+
+// runDeviceSessionReport prints the scan verbatim and exits: the fastest way
+// to tell why the app cannot see the phone's App Store session. Read-only.
+func runDeviceSessionReport() {
+	report := appstore.ScanDeviceSession(deviceSessionPatterns(), deviceDSID, resolveStoreFront(), "")
+
+	fmt.Print(report.Describe())
+
+	emit("phase", "device-session-report",
+		"found", strconv.Itoa(len(report.Found)),
+		"readable", strconv.Itoa(len(report.Readable)),
+		"sessions", strconv.Itoa(len(report.WithSessionCookies)),
+		"usable", boolString(report.Session != nil),
+		"reason", report.Reason())
+
+	if report.Session == nil {
+		os.Exit(23)
+	}
 }
 
 // installDeviceSession attaches the device session to the client when one is
@@ -379,7 +435,7 @@ func installDeviceSession(cfg *config.Config, as *appstore.Client) *appstore.Dev
 
 	session, err := resolveDeviceSession()
 	if err != nil {
-		emit("phase", "device-session-failed", "reason", err.Error())
+		emitDeviceSessionFailure(resolvedReport)
 		return nil
 	}
 

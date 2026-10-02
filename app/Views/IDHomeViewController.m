@@ -692,6 +692,7 @@ static NSString *IDPrettyImageName(NSString *name) {
     __block NSString *installedPath = nil;
     __block NSString *failureReason = nil;
     __block NSString *failureMessage = nil;
+    __block NSString *deviceSessionFailure = nil;
     __block NSString *lastHelperStderr = nil;
     __block NSInteger lastDownloadPercent = -1;
 
@@ -705,6 +706,12 @@ static NSString *IDPrettyImageName(NSString *name) {
         NSString *phase = ev[@"phase"] ?: @"";
         if ([phase isEqualToString:@"step"]) {
             [vc appendStatus:[NSString stringWithFormat:@"  %@", IDAppStoreStepTitle(ev[@"name"])]];
+        } else if ([phase isEqualToString:@"device-session"]) {
+            [vc appendStatus:[NSString stringWithFormat:@"  Using this device's App Store session (storefront %@)",
+                              ev[@"storefront"] ?: @"unknown"]];
+        } else if ([phase isEqualToString:@"device-session-failed"]) {
+            deviceSessionFailure = ev[@"reason"] ?: @"unknown";
+            [vc appendStatus:[NSString stringWithFormat:@"  No device App Store session: %@", deviceSessionFailure]];
         } else if ([phase isEqualToString:@"auth-required"]) {
             [vc appendStatus:@"  Apple ID sign-in required"];
         } else if ([phase isEqualToString:@"auth"]) {
@@ -774,6 +781,22 @@ static NSString *IDPrettyImageName(NSString *name) {
     }
                                  completion:^(int code, NSError *err) {
         [self cancelAppleAuthIdlePolling];
+
+        // A password sign-in cannot work on iOS: Apple requires an
+        // X-Apple-ActionSignature that only SAP can produce, and SAP has no iOS
+        // build. Prompting for credentials would only fail, so report why the
+        // device session was unavailable instead.
+        if (deviceSessionFailure.length) {
+            [self setAppleAuthState:IDAppleAuthStateRequired forGeneration:authGeneration];
+            NSString *message = [NSString stringWithFormat:
+                @"No App Store session found on this device: %@\n\nSign in to the App Store in Settings, open the App Store app once, then try again.",
+                deviceSessionFailure];
+            [vc markCompleteWithOutputIPA:@""
+                                    error:[NSError errorWithDomain:@"IDAppStoreAuth" code:3
+                                                          userInfo:@{NSLocalizedDescriptionKey: message}]];
+            return;
+        }
+
         BOOL needsCredentials = code == 20 ||
             [failureReason isEqualToString:@"auth-required"] ||
             [failureMessage containsString:@"Apple ID sign-in required"];
@@ -924,6 +947,7 @@ static NSString *IDPrettyImageName(NSString *name) {
     NSUInteger authGeneration = [self beginAppleAuthOperation];
     __block NSString *failureReason = nil;
     __block NSString *failureMessage = nil;
+    __block NSString *deviceSessionFailure = nil;
     __block NSString *lastHelperStderr = nil;
     [IDAppStoreHelperRunner refreshAuthWithEmail:email
                                         password:password
@@ -932,6 +956,12 @@ static NSString *IDPrettyImageName(NSString *name) {
         NSString *phase = ev[@"phase"] ?: @"";
         if ([phase isEqualToString:@"step"]) {
             [vc appendStatus:[NSString stringWithFormat:@"  %@", IDAppStoreStepTitle(ev[@"name"])]];
+        } else if ([phase isEqualToString:@"device-session"]) {
+            [vc appendStatus:[NSString stringWithFormat:@"  Using this device's App Store session (storefront %@)",
+                              ev[@"storefront"] ?: @"unknown"]];
+        } else if ([phase isEqualToString:@"device-session-failed"]) {
+            deviceSessionFailure = ev[@"reason"] ?: @"unknown";
+            [vc appendStatus:[NSString stringWithFormat:@"  No device App Store session: %@", deviceSessionFailure]];
         } else if ([phase isEqualToString:@"auth-required"]) {
             [vc appendStatus:@"  Apple ID sign-in required"];
         } else if ([phase isEqualToString:@"failed"]) {
@@ -947,6 +977,22 @@ static NSString *IDPrettyImageName(NSString *name) {
     }
                                       completion:^(int code, NSError *err) {
         [self cancelAppleAuthIdlePolling];
+
+        // A password sign-in cannot work on iOS: Apple requires an
+        // X-Apple-ActionSignature that only SAP can produce, and SAP has no iOS
+        // build. Prompting for credentials would only fail, so report why the
+        // device session was unavailable instead.
+        if (deviceSessionFailure.length) {
+            [self setAppleAuthState:IDAppleAuthStateRequired forGeneration:authGeneration];
+            NSString *message = [NSString stringWithFormat:
+                @"No App Store session found on this device: %@\n\nSign in to the App Store in Settings, open the App Store app once, then try again.",
+                deviceSessionFailure];
+            [vc markCompleteWithMessage:nil
+                                  error:[NSError errorWithDomain:@"IDAppStoreAuth" code:3
+                                                          userInfo:@{NSLocalizedDescriptionKey: message}]];
+            return;
+        }
+
         BOOL needsCredentials = code == 20 ||
             [failureReason isEqualToString:@"auth-required"] ||
             [failureMessage containsString:@"Apple ID sign-in required"];
