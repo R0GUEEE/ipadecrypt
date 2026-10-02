@@ -52,9 +52,9 @@ changelog:
       - "Merge pull request"
 
 release:
-  github:
-    owner: korboybeats
-    name: ipadecrypt
+  # No explicit owner/name: goreleaser infers the repository from the git
+  # remote, so whichever fork this runs in publishes to itself. Hardcoding an
+  # owner makes every other fork's release fail against the wrong repository.
   draft: true
   prerelease: auto
   extra_files:

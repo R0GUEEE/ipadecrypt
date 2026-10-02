@@ -25,6 +25,14 @@ jobs:
         with:
           version: v2.12.2
 
+      # Validates .goreleaser.yaml on every push. It is only otherwise exercised
+      # by a tag, where a syntax error is a broken release.
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: check
+
   build:
     name: build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
