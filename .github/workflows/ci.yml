@@ -76,7 +76,10 @@ jobs:
         id: meta
         run: |
           hash=$(sha256sum helper/Dockerfile | cut -c1-12)
-          owner="${{ github.repository_owner }}"
+          # GHCR rejects repository names with capitals, and GitHub logins may
+          # have them, so the image name is lowercased here.
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "owner=${owner}"                                        >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/${owner}/ipadecrypt-toolchain:df-${hash}" >> "$GITHUB_OUTPUT"
           echo "latest=ghcr.io/${owner}/ipadecrypt-toolchain:latest"    >> "$GITHUB_OUTPUT"
 
@@ -113,8 +116,8 @@ jobs:
           push: true
           provenance: false
           sbom: false
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/ipadecrypt-toolchain:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/ipadecrypt-toolchain:buildcache,mode=max,ignore-error=true
+          cache-from: type=registry,ref=ghcr.io/${{ steps.meta.outputs.owner }}/ipadecrypt-toolchain:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ steps.meta.outputs.owner }}/ipadecrypt-toolchain:buildcache,mode=max,ignore-error=true
           tags: ${{ steps.meta.outputs.image }}
 
       # Case C: image isn't in GHCR and we can't push (fork PR with changed Dockerfile).
@@ -128,7 +131,7 @@ jobs:
           load: true
           provenance: false
           sbom: false
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/ipadecrypt-toolchain:buildcache
+          cache-from: type=registry,ref=ghcr.io/${{ steps.meta.outputs.owner }}/ipadecrypt-toolchain:buildcache
           tags: ${{ steps.meta.outputs.image }}
 
       # On main, make sure :latest points at the current Dockerfile's image.
