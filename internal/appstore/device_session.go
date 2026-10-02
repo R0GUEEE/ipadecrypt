@@ -217,7 +217,7 @@ func (r DeviceSessionReport) Reason() string {
 	case len(r.Jars) == 0:
 		return fmt.Sprintf("%d cookie jars were readable but none decoded - the on-disk format is not what this build parses", len(r.Readable))
 	case len(r.WithSessionCookies) == 0:
-		return fmt.Sprintf("%d cookie jars decoded but none held an App Store session; cookie names seen: %s",
+		return fmt.Sprintf("%d cookie jars decoded but none held an App Store session (iOS keeps the App Store sign-in in StoreServices, not in cookies); cookie names seen: %s",
 			len(r.Jars), summariseCookieNames(r.CookieNameCounts()))
 	default:
 		return "an App Store session was found but it carries no Apple ID (DSID) - pass --dsid to override"

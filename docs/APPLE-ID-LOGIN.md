@@ -134,6 +134,50 @@ The DSID is a personal identifier: it is never written to the app log, only its
 length is, and `--device-session-report` prints the cookie *names* it found but
 never their values.
 
+## There is no App Store session to harvest on iOS
+
+A real device produced this scan:
+
+```
+24 cookie jars decoded but none held an App Store session; cookie names seen:
+  ACCOUNT_CHOOSER(2) AEC(4) APISID(2) BEC(2) Device(2) Firmware(6) HSID(2)
+  LSID(2) NID(4) OSID(2) SAPISID(2) SEARCH_SAMESITE(2) SID(2) SIDCC(2)
+  SMSV(2) SNID(2) SSID(2) UDID(6) XSRF-TOKEN(4) __Host-1PLSID(2)
+  __Secure-next-auth.session-token(2) __cf_bm(4) __dcfduid(4) _ga(2) …
+```
+
+Every one of those is a third-party **web** cookie - Google (`SID`, `HSID`,
+`SAPISID`, `NID`), Cloudflare (`__cf_bm`, `__dcfduid`), Discord (`__dcfduid`),
+analytics (`_ga`), a NextAuth site, and WebKit's own `Device`/`Firmware`/`UDID`.
+**There is not a single Apple cookie**, and in particular no `myacinfo`.
+
+That is the answer, not a scanning bug: the parser decoded all 24 jars and read
+hundreds of names out of them, and the paths are the ones that hold cookies. iOS
+simply does not keep its App Store session in a cookie jar, because the device
+App Store does not speak the Mac-Configurator protocol this tool emulates. It
+authenticates through **StoreServices** with a device identity and signed
+headers.
+
+So the cookie-harvesting path in `internal/appstore` cannot supply a session, no
+matter how wide the globs are. It is kept because it costs nothing and would
+work if a device ever did hold such cookies, but the app no longer tells you to
+sign in again as if that were the problem - the failure message says what is
+actually missing and points at the paths that work.
+
+### What that means for the version picker
+
+| Feature | Needs | Works on-device |
+|---|---|---|
+| Decrypt installed build | nothing | yes |
+| Latest iOS-compatible | the device's own App Store (StoreKit) | yes |
+| Latest from App Store / version picker | an authenticated App Store session | **no** |
+
+The two working paths cover "give me a runnable copy of this app", including the
+older-version prompt the device App Store raises for free. Choosing a *specific*
+historical version needs either the desktop CLI (where SAP runs) or a tweak that
+borrows the App Store app's own authenticated session - see the release notes for
+the trade-offs.
+
 ## Why a password sign-in reports HTTP 404
 
 If the device session is unavailable the app used to fall back to a password
