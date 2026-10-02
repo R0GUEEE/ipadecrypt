@@ -46,20 +46,23 @@ All installable through Sileo:
 | **AppSync Unified** | Bypasses installd's signature check (add repo `https://lukezgd.github.io/repo`) |
 | **appinst** | Installs modified IPAs on the device (add repo `https://lukezgd.github.io/repo`) |
 
-> Tested on palera1n rootless, Dopamine rootless, and RootHide. iOS 14 through 17 on A10–A14 devices are expected to work.
+> Tested on palera1n rootless, Dopamine rootless, and RootHide. iOS 14 through 17 on A9–A14 devices are expected to work. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the full matrix and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit together.
 
-**iOS 16.7.x / palera1n rootless.** iOS 16.7.x is the last 16.x branch for
-A9–A11 hardware (iPhone 8, iPhone 8 Plus, iPhone X, iPad 5/6, iPad Pro 10.5),
-which is jailbroken with palera1n rootless - Dopamine stops at 16.6.1. That
-setup is supported end to end:
+**iOS 16.7.x (including 16.7.16) / palera1n rootless.** iOS 16.7.x is the last
+16.x branch for A9–A11 hardware (iPhone 8, iPhone 8 Plus, iPhone X, iPad 5/6,
+iPad Pro 10.5), which is jailbroken with palera1n rootless - Dopamine stops at
+16.6.1. That setup is supported end to end:
 
 - `bootstrap` installs the **rootless** helper and tweak packages
   (`iphoneos-arm64`, i.e. `/var/jb` paths) on any jailbreak that is not
   RootHide.
-- The app and the tweak ship **arm64 and arm64e** slices; the helper is arm64,
-  which runs on A9/A10/A11 devices.
-- Everything is built against an iOS 15 deployment target, so the same
-  packages install on 16.7.x and on the jailbreaks below.
+- The app and the tweak ship **arm64 and arm64e** slices; the helper and the
+  daemon are arm64, which is what A9/A10/A11 devices run.
+- Every shipped binary declares a minimum OS of 14.0 or 15.0 - none of them
+  needs anything newer than 16.7.16. `python3 Tools/macho_info.py <binary>`
+  prints the platform, arch and minOS straight from the Mach-O load commands.
+- A9/A10/A11 have no PPL, so `task_for_pid` from the root helper works without
+  the arm64e caveat that applies to A12+.
 
 ## Install
 
@@ -95,10 +98,13 @@ Refer to [BUILDING.md](BUILDING.md) for helper and release-style build details.
 The release includes `.deb` packages for the on-device app and the optional
 auto-confirm tweak:
 
-- `com.korboy.ipadecrypt_0.7.3-korboy.3_iphoneos-arm64.deb`
-- `com.korboy.ipadecrypt_0.7.3-korboy.3_iphoneos-arm64e.deb` for RootHide
-- `com.korboy.ipadecryptautoalert_0.7.3-korboy.3_iphoneos-arm64.deb`
-- `com.korboy.ipadecryptautoalert_0.7.3-korboy.3_iphoneos-arm64e.deb` for RootHide
+- `com.korboy.ipadecrypt_0.7.4-korboy.1_iphoneos-arm64.deb`
+- `com.korboy.ipadecrypt_0.7.4-korboy.1_iphoneos-arm64e.deb` for RootHide
+- `com.korboy.ipadecryptautoalert_0.7.4-korboy.1_iphoneos-arm64.deb`
+- `com.korboy.ipadecryptautoalert_0.7.4-korboy.1_iphoneos-arm64e.deb` for RootHide
+
+For iOS 16.7.x install the `iphoneos-arm64` pair - that is the rootless build
+palera1n needs.
 
 To build every package from source without touching a device (CI does exactly
 this - see `.github/workflows/packages.yml`):

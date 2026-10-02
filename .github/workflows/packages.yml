@@ -26,6 +26,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  cli:
+    name: build CLI binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: darwin, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: linux, goarch: amd64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          ext=""
+          [ "$GOOS" = windows ] && ext=".exe"
+          go build -trimpath -ldflags="-s -w" -o "ipadecrypt-${GOOS}-${GOARCH}${ext}" ./cmd/ipadecrypt
+          ls -l "ipadecrypt-${GOOS}-${GOARCH}${ext}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipadecrypt-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ipadecrypt-${{ matrix.goos }}-${{ matrix.goarch }}*
+          if-no-files-found: error
+
   helper:
     name: build ipadecrypt-helper
     runs-on: ubuntu-latest
@@ -106,6 +145,23 @@ jobs:
             --helper helper/dist/ipadecrypt-helper-arm64 \
             --refresh-embedded \
             --rootless-only
+
+      # Records the arch / platform / minOS of every binary that ships, so a
+      # regression that silently raises the minimum iOS is visible in the log.
+      - name: verify package binaries
+        run: |
+          set -euo pipefail
+          deb=$(ls dist/com.korboy.ipadecrypt_*_iphoneos-arm64.deb)
+          rm -rf /tmp/verify && mkdir -p /tmp/verify
+          dpkg-deb -x "$deb" /tmp/verify
+          python3 Tools/macho_info.py \
+            /tmp/verify/var/jb/Applications/ipadecrypt.app/ipadecrypt \
+            /tmp/verify/var/jb/Applications/ipadecrypt.app/helper.arm64 \
+            /tmp/verify/var/jb/Applications/ipadecrypt.app/appstore-helper.arm64 \
+            /tmp/verify/var/jb/usr/libexec/ipadecryptd | tee /tmp/verify/binary-report.txt
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/verify/binary-report.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
