@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/londek/ipadecrypt/internal/config"
+ "github.com/londek/ipadecrypt/internal/inspection"
 	"github.com/spf13/cobra"
 )
 
@@ -159,7 +160,10 @@ func main() {
 
 	update := newUpdateCommand()
 
-	root.AddCommand(auth, bootstrap, download, decrypt, versions, doctor, keep, update)
+	inspect := &cobra.Command{Use:"inspect <ipa>", Short:"Inspect Mach-O encryption without a device",Args:cobra.ExactArgs(1),RunE:func(cmd *cobra.Command,args []string)error{
+ binaries,err:=inspection.IPA(args[0]);if err!=nil{return err};for _,b:=range binaries{fmt.Printf("%s cpu=%s cryptid=%d offset=%d size=%d\n",b.Path,b.CPU,b.CryptID,b.CryptOffset,b.CryptSize)};return nil
+ }}
+ root.AddCommand(auth, bootstrap, download, decrypt, versions, doctor, keep, update, inspect)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
