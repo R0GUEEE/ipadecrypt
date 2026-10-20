@@ -173,7 +173,7 @@ func main() {
  fmt.Println("offline: inspection only (not a decryption backend)")
  return nil
  }}
- root.AddCommand(auth, bootstrap, download, decrypt, versions, doctor, keep, update, inspect, backends, syntheticProofCommand())
+ root.AddCommand(auth, bootstrap, download, decrypt, versions, doctor, keep, update, inspect, backends, syntheticProofCommand(), compatibilityCommand())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
