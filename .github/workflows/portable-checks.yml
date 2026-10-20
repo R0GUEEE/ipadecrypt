@@ -51,3 +51,15 @@ jobs:
           xcrun simctl list runtimes
       - name: Confirm offline inspector builds on macOS
         run: go test ./internal/inspection ./internal/backend/... ./internal/validation/...
+
+  parser-fuzz-smoke:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Fuzz Mach-O structure parser
+        run: go test ./internal/validation -run '^$' -fuzz '^FuzzMachOStructure$' -fuzztime=20s -parallel=2
+      - name: Fuzz candidate comparator
+        run: go test ./internal/validation -run '^$' -fuzz '^FuzzCandidateComparison$' -fuzztime=20s -parallel=2
