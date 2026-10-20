@@ -4,20 +4,34 @@ on:
     branches: [feature/portable-backends]
   pull_request:
 jobs:
-  go-test:
+  native-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test portable packages
+        run: go test ./internal/backend/... ./internal/inspection/... ./cmd/ipadecrypt
+      - name: Build CLI natively
+        run: go build -o ipadecrypt-test ./cmd/ipadecrypt
+  cross-compile:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test ./internal/backend ./internal/inspection
-      - run: go test ./cmd/ipadecrypt
       - name: Cross compile CLI
         shell: bash
         run: |
-          for target in linux/amd64 windows/amd64 darwin/amd64 darwin/arm64; do
-            export GOOS="${target%/*}" GOARCH="${target#*/}"
+          for target in linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64; do
+            export GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0
             echo "Building $GOOS/$GOARCH"
             go build -o "$RUNNER_TEMP/ipadecrypt-$GOOS-$GOARCH" ./cmd/ipadecrypt
           done
