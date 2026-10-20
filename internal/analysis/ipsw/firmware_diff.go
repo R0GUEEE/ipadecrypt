@@ -45,6 +45,7 @@ func (t Tool) DiffFirmware(ctx context.Context,pair FirmwarePair)([]byte,error){
  if pair.OldPath==""||pair.NewPath==""{return nil,errors.New("invalid firmware pair")}
  ctx,cancel:=context.WithTimeout(ctx,20*time.Minute);defer cancel()
  args:=[]string{"diff",pair.OldPath,pair.NewPath}
+ if pair.Device!=""{args=append(args,"--device",pair.Device)}
  out,err:=t.run(ctx,args...)
  if err!=nil{return out,fmt.Errorf("ipsw firmware diff: %w",err)}
  return out,nil
