@@ -35,3 +35,16 @@ jobs:
             echo "Building $GOOS/$GOARCH"
             go build -o "$RUNNER_TEMP/ipadecrypt-$GOOS-$GOARCH" ./cmd/ipadecrypt
           done
+
+  simulator-capability:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect Xcode and simulator runtimes
+        shell: bash
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available
+          xcrun simctl list runtimes
+      - name: Confirm offline inspector builds on macOS
+        run: go test ./internal/inspection ./internal/backend/...
