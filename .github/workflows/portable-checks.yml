@@ -17,7 +17,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Test portable packages
-        run: go test ./internal/backend/... ./internal/inspection/... ./internal/validation/... ./cmd/ipadecrypt
+        run: go test ./internal/backend/... ./internal/inspection/... ./internal/validation/... ./internal/signature/... ./cmd/ipadecrypt
       - name: Build CLI natively
         run: go build -o ipadecrypt-test ./cmd/ipadecrypt
   cross-compile:
@@ -50,7 +50,7 @@ jobs:
           xcrun simctl list devices available
           xcrun simctl list runtimes
       - name: Confirm offline inspector builds on macOS
-        run: go test ./internal/inspection ./internal/backend/... ./internal/validation/...
+        run: go test ./internal/inspection ./internal/backend/... ./internal/validation/... ./internal/signature/...
 
   parser-fuzz-smoke:
     runs-on: macos-15
@@ -63,3 +63,13 @@ jobs:
         run: go test ./internal/validation -run '^$' -fuzz '^FuzzMachOStructure$' -fuzztime=20s -parallel=2
       - name: Fuzz candidate comparator
         run: go test ./internal/validation -run '^$' -fuzz '^FuzzCandidateComparison$' -fuzztime=20s -parallel=2
+
+  signature-fuzz-smoke:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Fuzz code-signature parser
+        run: go test ./internal/signature -run '^$' -fuzz '^FuzzInspect$' -fuzztime=20s -parallel=2
