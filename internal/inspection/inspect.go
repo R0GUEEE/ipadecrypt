@@ -3,6 +3,8 @@ package inspection
 
 import (
  "archive/zip"
+ "bytes"
+ "io"
  "debug/macho"
  "fmt"
  "path"
@@ -28,7 +30,10 @@ func IPA(filename string)([]Binary,error){
   if f.FileInfo().IsDir() || !strings.HasPrefix(f.Name,"Payload/") {continue}
   if path.Clean(f.Name)!=f.Name || strings.Contains(f.Name,"../"){return nil,fmt.Errorf("unsafe archive path %q",f.Name)}
   h,err:=f.Open();if err!=nil{return nil,err}
-  m,err:=macho.NewFile(h)
+  data,readErr:=io.ReadAll(io.LimitReader(h, 512<<20 + 1))
+  if readErr!=nil {h.Close();return nil,readErr}
+  if len(data)>512<<20 {h.Close();return nil,fmt.Errorf("Mach-O entry exceeds 512 MiB: %s",f.Name)}
+  m,err:=macho.NewFile(bytes.NewReader(data))
   if err!=nil {h.Close();continue}
   b:=Binary{Path:f.Name,CPU:m.Cpu.String()}
   for _,l:=range m.Loads {
