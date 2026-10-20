@@ -7,6 +7,7 @@ import (
 
 	"github.com/londek/ipadecrypt/internal/config"
  "github.com/londek/ipadecrypt/internal/inspection"
+ "github.com/londek/ipadecrypt/internal/backend/ios"
 	"github.com/spf13/cobra"
 )
 
@@ -163,7 +164,14 @@ func main() {
 	inspect := &cobra.Command{Use:"inspect <ipa>", Short:"Inspect Mach-O encryption without a device",Args:cobra.ExactArgs(1),RunE:func(cmd *cobra.Command,args []string)error{
  binaries,err:=inspection.IPA(args[0]);if err!=nil{return err};for _,b:=range binaries{fmt.Printf("%s cpu=%s cryptid=%d offset=%d size=%d\n",b.Path,b.CPU,b.CryptID,b.CryptOffset,b.CryptSize)};return nil
  }}
- root.AddCommand(auth, bootstrap, download, decrypt, versions, doctor, keep, update, inspect)
+ backends := &cobra.Command{Use:"backends",Short:"Report available decryption backends",RunE:func(cmd *cobra.Command,args []string)error{
+ cfg,_,err:=loadConfigOrDefault(rootDirOverride);if err!=nil{return err}
+ b:=ios.Backend{Device:cfg.Device};cap,err:=b.Probe(cmd.Context());if err!=nil{return err}
+ fmt.Printf("%s available=%t reason=%s\n",cap.Name,cap.Available,cap.Reason)
+ fmt.Println("offline: inspection only (not a decryption backend)")
+ return nil
+ }}
+ root.AddCommand(auth, bootstrap, download, decrypt, versions, doctor, keep, update, inspect, backends)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
