@@ -2,11 +2,13 @@ package main
 
 import (
 	"errors"
+ "encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/londek/ipadecrypt/internal/config"
  "github.com/londek/ipadecrypt/internal/inspection"
+ "github.com/londek/ipadecrypt/internal/compatibility"
  "github.com/londek/ipadecrypt/internal/backend/ios"
 	"github.com/spf13/cobra"
 )
