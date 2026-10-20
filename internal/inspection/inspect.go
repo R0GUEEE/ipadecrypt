@@ -4,9 +4,7 @@ package inspection
 import (
  "archive/zip"
  "debug/macho"
- "encoding/binary"
  "fmt"
- "io"
  "path"
  "strings"
 )
@@ -49,5 +47,3 @@ func IPA(filename string)([]Binary,error){
  }
  return result,nil
 }
-var _ binary.ByteOrder
-var _ io.Reader
