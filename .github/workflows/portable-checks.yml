@@ -1,0 +1,23 @@
+name: Portable checks
+on:
+  push:
+    branches: [feature/portable-backends]
+  pull_request:
+jobs:
+  go-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./internal/backend ./internal/inspection
+      - run: go test ./cmd/ipadecrypt
+      - name: Cross compile CLI
+        shell: bash
+        run: |
+          for target in linux/amd64 windows/amd64 darwin/amd64 darwin/arm64; do
+            export GOOS="${target%/*}" GOARCH="${target#*/}"
+            echo "Building $GOOS/$GOARCH"
+            go build -o "$RUNNER_TEMP/ipadecrypt-$GOOS-$GOARCH" ./cmd/ipadecrypt
+          done
