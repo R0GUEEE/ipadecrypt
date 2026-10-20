@@ -17,7 +17,7 @@ func TestFirmwarePair(t *testing.T){
  if pair.OldSHA256==pair.NewSHA256||len(pair.OldSHA256)!=64{t.Fatal("bad hashes")}
  tool:=Tool{Run:func(_ context.Context,_ string,args ...string)([]byte,error){
   joined:=strings.Join(args," ")
-  if !strings.Contains(joined,"diff ")||!strings.Contains(joined,"--device iPhone18,2"){t.Fatalf("unexpected arguments %v",args)}
+  if !strings.Contains(joined,"diff ")||strings.Contains(joined,"--device"){t.Fatalf("unexpected arguments %v",args)}
   return []byte("firmware comparison"),nil
  }}
  output,err:=tool.DiffFirmware(context.Background(),pair)
