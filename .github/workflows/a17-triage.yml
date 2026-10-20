@@ -1,0 +1,23 @@
+name: A17 firmware triage
+on:
+  push:
+    branches: [feature/portable-backends]
+    paths:
+      - 'scripts/triage_ipsw_diff.py'
+      - 'scripts/test_triage_ipsw_diff.py'
+      - '.github/workflows/a17-triage.yml'
+  pull_request:
+    paths:
+      - 'scripts/triage_ipsw_diff.py'
+      - 'scripts/test_triage_ipsw_diff.py'
+      - '.github/workflows/a17-triage.yml'
+jobs:
+  triage-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test read-only firmware diff classifier
+        run: cd scripts && python -m unittest -v test_triage_ipsw_diff.py
