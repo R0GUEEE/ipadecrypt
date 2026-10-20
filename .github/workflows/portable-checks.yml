@@ -72,4 +72,10 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Fuzz code-signature parser
-        run: go test ./internal/signature -run '^$' -fuzz '^FuzzInspect$' -fuzztime=20s -parallel=2
+        run: go test ./internal/signature -run '^
+ -fuzz '^FuzzInspect
+ -fuzztime=20s -parallel=2
+      - name: Fuzz embedded-signature SuperBlob
+        run: go test ./internal/signature -run '^
+ -fuzz '^FuzzSuperBlob
+ -fuzztime=20s -parallel=2
